@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "updated": "2026-10-02",
+  "sources": [
+    "CRA: RRSP, DPSP, TFSA limits table (2026: RRSP 33,810; TFSA 7,000)",
+    "CRA: FHSA rules (8,000 annual, 40,000 lifetime, carry-forward up to 8,000)",
+    "IRS Newsroom: 401(k) limit 24,500 and IRA limit 7,500 for 2026",
+    "HSA 2026 limits: 4,400 self-only, 8,750 family, 1,000 catch-up at 55+"
+  ],
+  "years": {
+    "2026": {
+      "TFSA": {
+        "annualCents": 700000
+      },
+      "RRSP": {
+        "annualCents": 3381000
+      },
+      "FHSA": {
+        "annualCents": 800000,
+        "lifetimeCents": 4000000,
+        "carryForwardCapCents": 800000
+      },
+      "IRA": {
+        "annualCents": 750000,
+        "catchUpCents": 110000,
+        "catchUpAge": 50
+      },
+      "K401": {
+        "annualCents": 2450000,
+        "catchUpCents": 800000,
+        "catchUpAge": 50,
+        "superCatchUpCents": 1125000,
+        "superMinAge": 60,
+        "superMaxAge": 63
+      },
+      "HSA": {
+        "annualCents": 440000,
+        "familyCents": 875000,
+        "catchUpCents": 100000,
+        "catchUpAge": 55
+      },
+      "RESP": {
+        "lifetimeCents": 5000000,
+        "grantRate": 0.2,
+        "grantEligibleCents": 250000,
+        "grantLifetimeCents": 720000
+      },
+      "RDSP": {
+        "lifetimeCents": 20000000
+      },
+      "SIMPLE": {
+        "annualCents": 1700000,
+        "catchUpCents": 400000,
+        "catchUpAge": 50,
+        "superCatchUpCents": 525000,
+        "superMinAge": 60,
+        "superMaxAge": 63
+      },
+      "SEP": {
+        "annualCents": 7200000
+      },
+      "SOLO401K": {
+        "annualCents": 7200000,
+        "catchUpCents": 800000,
+        "catchUpAge": 50,
+        "superCatchUpCents": 1125000,
+        "superMinAge": 60,
+        "superMaxAge": 63
+      },
+      "K457": {
+        "annualCents": 2450000,
+        "catchUpCents": 800000,
+        "catchUpAge": 50,
+        "superCatchUpCents": 1125000,
+        "superMinAge": 60,
+        "superMaxAge": 63
+      },
+      "FSA": {
+        "annualCents": 340000
+      },
+      "DCFSA": {
+        "annualCents": 750000,
+        "separateCents": 375000
+      },
+      "P529": {
+        "annualCents": 1900000
+      },
+      "COVERDELL": {
+        "annualCents": 200000
+      },
+      "ABLE": {
+        "annualCents": 1900000
+      }
+    }
+  },
+  "deadlines": [
+    {
+      "id": "fhsa-year-end",
+      "title": "FHSA year-end",
+      "desc": "Contribute before midnight for it to count toward this year.",
+      "countries": [
+        "CA"
+      ],
+      "accounts": [
+        "FHSA"
+      ],
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 31,
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "tfsa-reset",
+      "title": "TFSA room resets",
+      "desc": "Last year's withdrawals are added back to your room.",
+      "countries": [
+        "CA"
+      ],
+      "accounts": [
+        "TFSA"
+      ],
+      "rule": {
+        "type": "fixed",
+        "month": 1,
+        "day": 1,
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "rrsp-deadline",
+      "title": "RRSP contribution deadline",
+      "desc": "Contributions up to this date can count toward last year's tax return.",
+      "countries": [
+        "CA"
+      ],
+      "accounts": [
+        "RRSP"
+      ],
+      "rule": {
+        "type": "dayOfYear",
+        "n": 60,
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "k401-year-end",
+      "title": "401(k) year-end",
+      "desc": "Payroll deferrals must be made by Dec 31 to count for this year.",
+      "countries": [
+        "US"
+      ],
+      "accounts": [
+        "K401"
+      ],
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 31,
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "ira-hsa-tax-day",
+      "title": "IRA, HSA, SEP and Coverdell prior-year deadline",
+      "desc": "Last day to fund last year's IRA, HSA, SEP IRA and Coverdell contributions.",
+      "countries": [
+        "US"
+      ],
+      "accounts": [
+        "IRA",
+        "HSA",
+        "SEP",
+        "COVERDELL"
+      ],
+      "rule": {
+        "type": "taxDay",
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "resp-year-end",
+      "title": "RESP year-end",
+      "desc": "Contribute by Dec 31 to earn the Canada Education Savings Grant for the year.",
+      "countries": [
+        "CA"
+      ],
+      "accounts": [
+        "RESP"
+      ],
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 31,
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "rdsp-year-end",
+      "title": "RDSP year-end",
+      "desc": "Contribute by Dec 31 for the year's matching grant, if you are eligible.",
+      "countries": [
+        "CA"
+      ],
+      "accounts": [
+        "RDSP"
+      ],
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 31,
+        "yearOffset": 0
+      }
+    },
+    {
+      "id": "us-year-end-other",
+      "title": "Year-end contributions",
+      "desc": "Payroll deferrals and gifts for the year must be made by Dec 31 (457(b), SIMPLE IRA, Solo 401(k), 529, ABLE, FSA).",
+      "countries": [
+        "US"
+      ],
+      "accounts": [
+        "K457",
+        "SIMPLE",
+        "SOLO401K",
+        "P529",
+        "ABLE",
+        "FSA",
+        "DCFSA"
+      ],
+      "rule": {
+        "type": "fixed",
+        "month": 12,
+        "day": 31,
+        "yearOffset": 0
+      }
+    }
+  ]
+}
