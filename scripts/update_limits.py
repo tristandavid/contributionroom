@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """Adds each new year's contribution limits to limits.json (run daily by .github/workflows/update-limits.yml).
 
+No AI, no paid service. Every number is read by fixed rules from an official page, and cross-checked:
+  * Canada (TFSA, RRSP): the CRA's yearly limits table.
+  * US retirement (IRA, 401(k), SIMPLE, SEP, 457(b)): the IRS "COLA increases" page, which has one table column per year,
+    plus the one sentence on each page that states the 60-63 "super" catch-up.
+  * US health and gift (HSA, health FSA, gift exclusion): one sentence or table row each, from IRS Publication 969 and the
+    IRS gift-tax page.
 How it stays safe
-  * Canada (TFSA, RRSP): read from the CRA's yearly limits table. No AI involved.
-  * US (IRA, 401(k), SIMPLE, SEP, HSA, FSA, ...): the model only reads short snippets of official IRS pages. Every number it
-    returns must appear word for word in those snippets and be a plausible step from last year, or nothing is published.
-  * A new year is only created when every REQUIRED field is found. Optional fields (HSA, FSA, dependent care, gift
-    exclusion) are carried forward from last year if their page has not been updated yet; they are listed under "carried"
-    in limits.json and retried on every run until the real number is found. A GitHub issue is opened so you know.
-  * Fixed-by-law limits (FHSA, RESP, RDSP, Coverdell, catch-up ages) are copied forward unchanged.
+  * A new year is only created when every REQUIRED field is found. Missing or reworded pages mean "not ready", never a guess.
+  * Numbers that must agree (457(b) = 401(k), 415(c) limit = SEP) are checked against each other, and every number must be a
+    plausible step from last year, or nothing is published.
+  * Optional fields (HSA, health FSA, gift exclusion) are carried forward from last year if their page has not been updated
+    yet; they are listed under "carried" in limits.json and retried on every run. A GitHub issue is opened so you know.
+  * Fixed-by-law limits (FHSA, RESP, RDSP, Coverdell, dependent-care FSA, catch-up ages) are copied forward unchanged.
+  * If the new year is still missing on January 15 of that year, the run fails and GitHub emails you.
 
 Exit codes: 0 = nothing to do, not published yet, or updated.  1 = something is wrong and a person should look.
 """
@@ -27,64 +33,47 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIMITS_PATH = os.path.join(ROOT, "limits.json")
 REPORT_PATH = os.path.join(ROOT, ".limits-report.md")
 
-CRA_URL = ("https://www.canada.ca/en/revenue-agency/services/tax/registered-plans-administrators/pspa/"
-           "mp-rrsp-dpsp-tfsa-limits-ympe.html")
+# Official pages. A required page that fails to load stops the run (and is reported); optional ones are treated as "not yet".
+PAGES = {
+    "cra": "https://www.canada.ca/en/revenue-agency/services/tax/registered-plans-administrators/pspa/mp-rrsp-dpsp-tfsa-limits-ympe.html",
+    "irs_cola": "https://www.irs.gov/retirement-plans/cola-increases-for-dollar-limitations-on-benefits-and-contributions",
+    "irs_simple": "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-simple-ira-contribution-limits",
+    "irs_p969": "https://www.irs.gov/publications/p969",
+    "irs_gift": "https://www.irs.gov/businesses/small-businesses-self-employed/frequently-asked-questions-on-gift-taxes",
+}
+OPTIONAL_PAGES = {"irs_p969", "irs_gift"}
 
-# Official IRS pages the US numbers come from. A page that fails to load is skipped (and reported), so edit this list
-# if the IRS moves one. The model only ever sees short snippets that mention the target year and a dollar amount.
-IRS_PAGES = [
-    "https://www.irs.gov/retirement-plans/cola-increases-for-dollar-limitations-on-benefits-and-contributions",
-    "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-401k-and-profit-sharing-plan-contribution-limits",
-    "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-ira-contribution-limits",
-    "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-457b-contribution-limits",
-    "https://www.irs.gov/retirement-plans/plan-participant-employee/retirement-topics-simple-ira-contribution-limits",
-    "https://www.irs.gov/publications/p969",
-    "https://www.irs.gov/businesses/small-businesses-self-employed/frequently-asked-questions-on-gift-taxes",
-]
-
-# key -> (account, json field, required, group). Money is dollars from the model and cents in limits.json.
+# key -> (account, json field, required)
 FIELDS = {
-    "ira_annual": ("IRA", "annualCents", True, "retirement"),
-    "ira_catchup": ("IRA", "catchUpCents", True, "retirement"),
-    "k401_annual": ("K401", "annualCents", True, "retirement"),
-    "k401_catchup": ("K401", "catchUpCents", True, "retirement"),
-    "k401_super_catchup": ("K401", "superCatchUpCents", True, "retirement"),
-    "simple_annual": ("SIMPLE", "annualCents", True, "retirement"),
-    "simple_catchup": ("SIMPLE", "catchUpCents", True, "retirement"),
-    "simple_super_catchup": ("SIMPLE", "superCatchUpCents", True, "retirement"),
-    "sep_annual": ("SEP", "annualCents", True, "retirement"),
-    "hsa_self": ("HSA", "annualCents", False, "health"),
-    "hsa_family": ("HSA", "familyCents", False, "health"),
-    "hsa_catchup": ("HSA", "catchUpCents", False, "health"),
-    "fsa_health": ("FSA", "annualCents", False, "health"),
-    "dcfsa": ("DCFSA", "annualCents", False, "health"),
-    "dcfsa_separate": ("DCFSA", "separateCents", False, "health"),
-    "gift_exclusion": ("P529", "annualCents", False, "gift"),
+    "ira_annual": ("IRA", "annualCents", True),
+    "ira_catchup": ("IRA", "catchUpCents", True),
+    "k401_annual": ("K401", "annualCents", True),
+    "k401_catchup": ("K401", "catchUpCents", True),
+    "k401_super_catchup": ("K401", "superCatchUpCents", True),
+    "simple_annual": ("SIMPLE", "annualCents", True),
+    "simple_catchup": ("SIMPLE", "catchUpCents", True),
+    "simple_super_catchup": ("SIMPLE", "superCatchUpCents", True),
+    "sep_annual": ("SEP", "annualCents", True),
+    "hsa_self": ("HSA", "annualCents", False),
+    "hsa_family": ("HSA", "familyCents", False),
+    "fsa_health": ("FSA", "annualCents", False),
+    "gift_exclusion": ("P529", "annualCents", False),
 }
 DESCRIPTIONS = {
-    "ira_annual": "IRA contribution limit (traditional and Roth combined)",
-    "ira_catchup": "IRA catch-up contribution for age 50 and over",
-    "k401_annual": "401(k)/403(b)/TSP/457(b) employee elective deferral limit",
-    "k401_catchup": "401(k) catch-up contribution for age 50 and over",
-    "k401_super_catchup": "401(k) catch-up for ages 60 to 63 (the higher 'super' catch-up)",
-    "simple_annual": "SIMPLE IRA employee deferral limit (the standard one, not the higher small-employer one)",
-    "simple_catchup": "SIMPLE IRA catch-up for age 50 and over (standard)",
+    "ira_annual": "IRA contribution limit",
+    "ira_catchup": "IRA catch-up (age 50+)",
+    "k401_annual": "401(k)/403(b)/TSP/457(b) deferral limit",
+    "k401_catchup": "401(k) catch-up (age 50+)",
+    "k401_super_catchup": "401(k) catch-up for ages 60 to 63",
+    "simple_annual": "SIMPLE IRA deferral limit",
+    "simple_catchup": "SIMPLE IRA catch-up (age 50+)",
     "simple_super_catchup": "SIMPLE IRA catch-up for ages 60 to 63",
-    "sep_annual": "Defined contribution plan annual additions limit (section 415(c)), also the SEP IRA and Solo 401(k) total",
-    "hsa_self": "HSA contribution limit, self-only coverage",
-    "hsa_family": "HSA contribution limit, family coverage",
-    "hsa_catchup": "HSA catch-up contribution for age 55 and over",
-    "fsa_health": "Health flexible spending arrangement (FSA) salary reduction limit",
-    "dcfsa": "Dependent care FSA limit (single or joint return)",
-    "dcfsa_separate": "Dependent care FSA limit, married filing separately",
-    "gift_exclusion": "Annual gift tax exclusion per recipient",
+    "sep_annual": "SEP IRA / Solo 401(k) total limit",
+    "hsa_self": "HSA limit, self-only",
+    "hsa_family": "HSA limit, family",
+    "fsa_health": "Health FSA salary reduction limit",
+    "gift_exclusion": "Annual gift tax exclusion",
 }
-GROUP_KEYWORDS = {
-    "retirement": r"401\(k\)|IRA|SIMPLE|SEP|catch-up|catch up|415|403\(b\)|457",
-    "health": r"HSA|health savings|FSA|flexible spending|dependent care",
-    "gift": r"gift|annual exclusion",
-}
-SNIPPET_CAP = 9000  # characters per model call, so it fits the free tier's small input limit
 PLAUSIBLE = (0.85, 1.6)  # new value / last year's value
 
 
@@ -200,98 +189,124 @@ def cra_limits(tables, year):
     return out
 
 
-# ---------------------------------------------------------------- US (IRS pages + free GitHub Models)
+# ---------------------------------------------------------------- Canada (CRA table, no AI)
 
-def snippets(text, year, group):
-    """Short pieces of the page that mention the year, a dollar amount and the group's topic."""
-    pieces = re.split(r"(?<=[.!?])\s+|\n+", text)
-    keep, total, seen = [], 0, set()
-    for s in pieces:
-        s = s.strip()
-        if (len(s) < 25 or str(year) not in s or "$" not in s or s in seen
-                or not re.search(GROUP_KEYWORDS[group], s, re.I)):
-            continue
-        s = s[:600]
-        seen.add(s)
-        if total + len(s) > SNIPPET_CAP:
-            break
-        keep.append(s)
-        total += len(s) + 1
-    return "\n".join(keep)
-
-
-def call_model(messages):
-    """One call to GitHub Models (free for Actions with the built-in token). Retries on rate limits."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise Failure("GITHUB_TOKEN is not set, so the free GitHub Models service cannot be used.")
-    body = json.dumps({
-        "model": os.environ.get("LIMITS_MODEL", "openai/gpt-4.1"),
-        "messages": messages,
-        "temperature": 0,
-        "response_format": {"type": "json_object"},
-    }).encode()
-    req = urllib.request.Request(
-        "https://models.github.ai/inference/chat/completions", data=body,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-                 "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
-    last = None
-    for attempt in range(4):
-        try:
-            with urllib.request.urlopen(req, timeout=90) as r:
-                raw = r.read()
-                status = r.status
-            try:
-                return json.loads(raw)["choices"][0]["message"]["content"]
-            except (ValueError, KeyError, IndexError, TypeError):
-                last = f"HTTP {status}, unexpected body: {raw[:300]!r}"
-                break
-        except urllib.error.HTTPError as e:
-            last = f"HTTP {e.code} {e.read()[:200]!r}"
-            if e.code not in (429, 500, 502, 503, 504):
-                break
-        except (urllib.error.URLError, TimeoutError, KeyError, ValueError) as e:
-            last = str(e)
-        time.sleep(20 * (attempt + 1))
-    raise Failure(f"GitHub Models call failed: {last}")
-
-
-def ask_model(year, keys, text):
-    fields = "\n".join(f'- "{k}": {DESCRIPTIONS[k]}' for k in keys)
-    system = ("You read official US tax-agency text and report dollar limits. Reply with one JSON object only. "
-              "Use whole dollars as plain integers (no $ or commas). Use null when the text does not state that exact "
-              "limit for the requested year. Never guess, estimate or use another year's figure.")
-    user = f"Tax year: {year}\nKeys to fill:\n{fields}\n\nOfficial text:\n{text}"
-    raw = call_model([{"role": "system", "content": system}, {"role": "user", "content": user}])
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        raise Failure(f"Model did not return JSON: {raw[:200]!r}")
-    return data if isinstance(data, dict) else {}
-
-
-def irs_limits(pages_text, year, wanted):
-    """Returns {key: dollars} for the wanted keys that are stated for `year` and appear word for word in the source."""
-    found = {}
-    for group in ("retirement", "health", "gift"):
-        keys = [k for k in wanted if FIELDS[k][3] == group]
-        if not keys:
-            continue
-        text = snippets(pages_text, year, group)
-        if not text:
-            continue
-        answer = ask_model(year, keys, text)
-        for k in keys:
-            v = answer.get(k)
-            if v is None:
+def cra_limits(tables, year):
+    """Returns {'TFSA': dollars, 'RRSP': dollars}. Raises Failure if the table layout changed, NotReady if the year is absent."""
+    out = {}
+    for name in ("RRSP", "TFSA"):
+        found_table = False
+        for rows in tables:
+            header = next((r for r in rows if r and re.search(r"year", r[0], re.I) and any(name in c.upper() for c in r)), None)
+            if header is None:
                 continue
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v) or v <= 0:
-                raise Failure(f"Model returned a bad value for {k}: {v!r}")
-            v = int(v)
-            if f"{v:,}" not in text:
-                raise Failure(f"{k}={v:,} does not appear in the official text the model was given. Not publishing.")
-            found[k] = v
-    return found
+            found_table = True
+            col = next(i for i, c in enumerate(header) if name in c.upper() and i > 0)
+            row = next((r for r in rows if r and r[0].strip() == str(year)), None)
+            if row is None or col >= len(row):
+                break
+            v = dollars(row[col])
+            if v:
+                out[name] = v
+            break
+        if not found_table:
+            raise Failure(f"CRA page: could not find the {name} table. The page layout probably changed.")
+    if len(out) < 2:
+        raise NotReady(f"CRA table has no {year} row for {', '.join(n for n in ('RRSP', 'TFSA') if n not in out)} yet.")
+    return out
+
+
+# ---------------------------------------------------------------- US (fixed rules)
+
+def load_page(name):
+    """Returns (text, tables) for a named official page. Tests replace this with saved copies."""
+    try:
+        return parse_html(fetch(PAGES[name]))
+    except OSError:
+        if name in OPTIONAL_PAGES:
+            say(f"Could not load {PAGES[name]}", "warning")
+            return "", []
+        raise
+
+
+def table_value(tables, section, label, year):
+    """Value in the table whose first header cell matches `section`, row matching `label`, column headed `year`.
+    None when that table has no column for the year yet. Failure when the table or row is missing (layout changed)."""
+    table = next((t for t in tables if t and t[0] and re.search(section, t[0][0])), None)
+    if table is None:
+        raise Failure(f"IRS page: table '{section}' not found. The page layout probably changed.")
+    header = table[0]
+    if str(year) not in header:
+        return None
+    col = header.index(str(year))
+    row = next((r for r in table[1:] if r and re.search(label, r[0])), None)
+    if row is None or col >= len(row):
+        raise Failure(f"IRS page: row '{label}' not found in table '{section}'. The page layout probably changed.")
+    return dollars(row[col])
+
+
+def sentence_value(text, pattern, year, groups=1):
+    m = re.search(pattern.replace("{year}", str(year)), text, re.I)
+    if not m:
+        return None
+    vals = [int(m.group(i).replace(",", "")) for i in range(1, groups + 1)]
+    return vals if groups > 1 else vals[0]
+
+
+def us_limits(pages, year):
+    """pages: {name: (text, tables)}. Returns ({key: dollars}, [required keys not found]). Raises Failure on a layout change
+    or when numbers that must agree do not."""
+    cola_text, cola = pages["irs_cola"]
+    found = {}
+
+    def put(key, value):
+        if value:
+            found[key] = value
+
+    put("ira_annual", table_value(cola, r"^IRAs", r"^IRA contribution limit", year))
+    put("ira_catchup", table_value(cola, r"^IRAs", r"^IRA catch-up", year))
+    put("k401_annual", table_value(cola, r"^401\(k\)", r"^Elective deferrals", year))
+    put("k401_catchup", table_value(cola, r"^401\(k\)", r"^Catch-up contributions", year))
+    put("simple_annual", table_value(cola, r"^SIMPLE", r"^SIMPLE maximum contributions", year))
+    put("simple_catchup", table_value(cola, r"^SIMPLE", r"^Catch-up contributions", year))
+    put("sep_annual", table_value(cola, r"^SEP$", r"^SEP maximum contribution", year))
+    put("k401_super_catchup", sentence_value(
+        cola_text, r"these plans\. For {year}, this higher catch-up contribution limit is \$([\d,]+)", year))
+    put("simple_super_catchup", sentence_value(
+        pages["irs_simple"][0], r"For {year}, this higher catch-up contribution limit is \$([\d,]+)", year))
+
+    # Numbers that must agree with each other.
+    k457 = table_value(cola, r"^Other", r"^457 elective deferrals", year)
+    if k457 and found.get("k401_annual") and k457 != found["k401_annual"]:
+        raise Failure(f"{year}: 457(b) limit {k457:,} differs from the 401(k) limit {found['k401_annual']:,}.")
+    dc = table_value(cola, r"^401\(k\)", r"^Defined contribution plan limit", year)
+    if dc and found.get("sep_annual") and dc != found["sep_annual"]:
+        raise Failure(f"{year}: SEP limit {found['sep_annual']:,} differs from the 415(c) limit {dc:,}.")
+
+    # Optional: health and gift.
+    hsa = sentence_value(
+        pages["irs_p969"][0],
+        r"For {year}, if you have self-only HDHP coverage, you can contribute up to \$([\d,]+)\. "
+        r"If you have family HDHP coverage, you can contribute up to \$([\d,]+)", year, groups=2)
+    if hsa:
+        found["hsa_self"], found["hsa_family"] = hsa
+    put("fsa_health", sentence_value(
+        pages["irs_p969"][0],
+        r"for tax years beginning in {year}, the dollar limitation under (?:Code )?section 125\(i\)[^$]{0,200}?"
+        r"Health Flexible Spending Arrangements is \$([\d,]+)", year))
+    for t in pages["irs_gift"][1]:
+        if t and t[0] and t[0][0] == "Year of gift" and any("exclusion per donee" in c for c in t[0]):
+            row = next((r for r in t[1:] if r and r[0].strip() == str(year)), None)
+            if row and len(row) > 1:
+                put("gift_exclusion", dollars(row[1]))
+            break
+
+    missing = [k for k, f in FIELDS.items() if f[2] and k not in found]
+    return found, missing
+
+
+def load_us_pages():
+    return {name: load_page(name) for name in PAGES if name != "cra"}
 
 
 # ---------------------------------------------------------------- merging
@@ -333,7 +348,7 @@ def run(today=None, dry_run=False):
     target = latest + 1
     if target <= today.year + 1 and today >= datetime.date(target - 1, 9, 1):
         try:
-            cents, warns = gather_new(data, target)
+            cents = gather_new(data, target)
             entry, missing_opt = build_entry(data, target, cents)
             data["years"][str(target)] = entry
             if missing_opt:
@@ -342,7 +357,7 @@ def run(today=None, dry_run=False):
             data.setdefault("sources", []).append(
                 f"{target}: CRA limits table and IRS pages, read automatically on {today.isoformat()}")
             changed = True
-            log += [f"Published {target} limits."] + warns
+            log.append(f"Published {target} limits.")
             if missing_opt:
                 log.append(f"Carried forward from {target - 1} (not announced yet): {', '.join(missing_opt)}")
         except NotReady as e:
@@ -358,19 +373,8 @@ def run(today=None, dry_run=False):
             carried.pop(y, None)
             continue
         year = int(y)
-        try:
-            pages = []
-            for url in IRS_PAGES:
-                try:
-                    pages.append(parse_html(fetch(url))[0])
-                except OSError:
-                    pass
-            joined = "\n".join(pages)
-            if str(year) not in joined:
-                continue
-            found = irs_limits(joined, year, keys)
-        except Failure:
-            raise
+        found, _ = us_limits(load_us_pages(), year)
+        found = {k: v for k, v in found.items() if k in keys}
         if not found:
             continue
         entry = data["years"][y]
@@ -397,31 +401,15 @@ def run(today=None, dry_run=False):
 
 
 def gather_new(data, year):
-    prev_key = str(year - 1)
-    prev = data["years"].get(prev_key) or data["years"][max(data["years"], key=int)]
-    cents, warnings = {}, []
-    cra_tables = parse_html(fetch(CRA_URL))[1]
-    say(f"CRA page loaded: {len(cra_tables)} tables found.")
-    cra = cra_limits(cra_tables, year)
-    cents[("TFSA", "annualCents")] = cra["TFSA"] * 100
-    cents[("RRSP", "annualCents")] = cra["RRSP"] * 100
-    texts = []
-    for url in IRS_PAGES:
-        try:
-            texts.append(parse_html(fetch(url))[0])
-        except OSError as e:
-            warnings.append(f"Could not load {url} ({e}).")
-            say(f"Could not load {url} ({e}).", "warning")
-    joined = "\n".join(texts)
-    if str(year) not in joined:
-        raise NotReady(f"The IRS pages do not mention {year} yet.")
-    found = irs_limits(joined, year, list(FIELDS))
+    """Returns {(account, field): cents} for `year`. Raises NotReady until every required figure is published."""
+    cra = cra_limits(parse_html(fetch(PAGES["cra"]))[1], year)
+    found, missing = us_limits(load_us_pages(), year)
+    if missing:
+        raise NotReady(f"IRS pages do not state the {year} figure yet for: {', '.join(missing)}.")
+    cents = {("TFSA", "annualCents"): cra["TFSA"] * 100, ("RRSP", "annualCents"): cra["RRSP"] * 100}
     for k, v in found.items():
         cents[(FIELDS[k][0], FIELDS[k][1])] = v * 100
-    required_missing = [k for k, f in FIELDS.items() if f[2] and k not in found]
-    if required_missing:
-        raise NotReady(f"IRS pages do not state the {year} figure yet for: {', '.join(required_missing)}.")
-    return cents, warnings
+    return cents
 
 
 def build_entry(data, year, cents):
@@ -430,7 +418,7 @@ def build_entry(data, year, cents):
     apply_values(entry, prev, cents, year)
     derive(entry)
     got = {(a, f) for a, f in cents}
-    missing_opt = [k for k, (a, f, req, _) in FIELDS.items() if not req and (a, f) not in got]
+    missing_opt = [k for k, (a, f, req) in FIELDS.items() if not req and (a, f) not in got]
     return entry, missing_opt
 
 
@@ -454,20 +442,11 @@ def verify(year):
         known = json.load(fh)["years"].get(str(year))
     if not known:
         raise Failure(f"limits.json has no {year} to compare with.")
-    cra = cra_limits(parse_html(fetch(CRA_URL))[1], year)
+    cra = cra_limits(parse_html(fetch(PAGES["cra"]))[1], year)
     say(f"CRA {year}: RRSP {cra['RRSP']:,} (file {known['RRSP']['annualCents'] // 100:,}), "
         f"TFSA {cra['TFSA']:,} (file {known['TFSA']['annualCents'] // 100:,})")
-    texts, loaded = [], 0
-    for url in IRS_PAGES:
-        try:
-            texts.append(parse_html(fetch(url))[0])
-            loaded += 1
-        except OSError as e:
-            say(f"IRS page not loaded: {url} ({e})", "warning")
-    joined = "\n".join(texts)
-    say(f"IRS pages loaded: {loaded} of {len(IRS_PAGES)}. Mentions {year}: {str(year) in joined}.")
-    found = irs_limits(joined, year, list(FIELDS))
-    for k, (acct, field, required, _) in FIELDS.items():
+    found, _ = us_limits(load_us_pages(), year)
+    for k, (acct, field, required) in FIELDS.items():
         want = known[acct][field] // 100
         got = found.get(k)
         status = "MATCH" if got == want else ("not found" if got is None else "DIFFERENT")
@@ -475,23 +454,7 @@ def verify(year):
             "notice" if status == "MATCH" else "warning")
 
 
-def snapshot(folder):
-    """Saves what the script sees on each official page (text and tables) so rules can be checked against real pages."""
-    os.makedirs(folder, exist_ok=True)
-    for i, url in enumerate([CRA_URL] + IRS_PAGES):
-        try:
-            text, tables = parse_html(fetch(url))
-        except OSError as e:
-            text, tables = f"NOT LOADED: {e}", []
-        text = re.sub(r"\n\s*\n+", "\n", text)
-        with open(os.path.join(folder, f"{i:02d}.txt"), "w", encoding="utf-8") as fh:
-            fh.write(f"URL: {url}\n\n{text}\n\nTABLES:\n{json.dumps(tables, indent=0, ensure_ascii=False)}\n")
-
-
 def main(argv):
-    if "--snapshot" in argv:
-        snapshot(argv[argv.index("--snapshot") + 1])
-        return 0
     if "--verify" in argv:
         try:
             verify(int(argv[argv.index("--verify") + 1]))

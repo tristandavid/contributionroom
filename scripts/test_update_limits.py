@@ -1,103 +1,154 @@
-"""Offline tests: python3 scripts/test_update_limits.py   (no network, the model is faked)."""
-import copy, datetime, json, os, sys, tempfile, unittest
-sys.path.insert(0, os.path.dirname(__file__))
+"""Offline tests: python3 scripts/test_update_limits.py   (no network; uses saved copies of the real 2026 pages)."""
+import copy, datetime, json, os, re, sys, tempfile, unittest
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 import update_limits as U
 
-CRA_HTML = """<html><body><table><caption>MP, DB, RRSP, DPSP limits, YMPE and the YAMPE</caption>
-<tr><th>Year</th><th>MP limit</th><th>DB limit</th><th>RRSP dollar limit</th><th>DPSP limit</th><th>YMPE</th></tr>
-<tr><td>2027</td><td>$36,000</td><td>$4,000.00</td><td>$34,400</td><td>$18,000</td><td>$76,000</td></tr>
-<tr><td>2026</td><td>$35,390</td><td>$3,932.22</td><td>$33,810</td><td>$17,695</td><td>$74,600</td></tr></table>
-<table><tr><th>Year</th><th>TFSA dollar limit</th><th>ALDA dollar limit</th></tr>
-<tr><td>2027</td><td>$7,000</td><td>$170,000</td></tr><tr><td>2026</td><td>$7,000</td><td>$160,000</td></tr></table></body></html>"""
-CRA_NO_YEAR = CRA_HTML.replace("<td>2027</td>", "<td>2025</td>")
-IRS = {
- "retirement": ("For 2027, the 401(k) employee deferral limit is $25,000. The IRA limit for 2027 is $7,750. "
-   "For 2027 the catch-up for age 50 and over is $8,000 for 401(k) plans and the IRA catch-up is $1,100. "
-   "For 2027 the 401(k) catch-up for ages 60 to 63 is $11,250. For 2027 the SIMPLE IRA limit is $17,500 and the SIMPLE catch-up is $4,000, "
-   "ages 60 to 63 $5,250. For 2027 the section 415(c) limit is $73,000."),
-}
-FAKE_ANSWER = {"ira_annual": 7750, "ira_catchup": 1100, "k401_annual": 25000, "k401_catchup": 8000, "k401_super_catchup": 11250,
-               "simple_annual": 17500, "simple_catchup": 4000, "simple_super_catchup": 5250, "sep_annual": 73000}
+
+def fixture(name):
+    with open(os.path.join(HERE, "fixtures", f"{name}.json"), encoding="utf-8") as f:
+        d = json.load(f)
+    return d["text"], d["tables"]
+
 
 def base_data():
-    with open(os.path.join(os.path.dirname(__file__), "..", "limits.json"), encoding="utf-8") as f:
+    with open(os.path.join(HERE, "..", "limits.json"), encoding="utf-8") as f:
         return json.load(f)
 
+
+def bump(pages, year):
+    """Turns the saved 2026 pages into pages that also publish `year` (every figure +2%, rounded to 50)."""
+    def up(cell):
+        v = U.dollars(cell)
+        return cell if not v else "$" + format(int(round(v * 1.02 / 50) * 50), ",")
+    out = {}
+    for name, (text, tables) in pages.items():
+        tables = copy.deepcopy(tables)
+        for t in tables:
+            if name == "irs_cola" and t and t[0] and t[0][0] and "2026" in t[0]:
+                i = t[0].index("2026")
+                t[0].insert(i, str(year))
+                for r in t[1:]:
+                    if len(r) > i:
+                        r.insert(i, up(r[i]))
+        if name == "irs_cola":
+            text = text.replace("For 2026, this higher catch-up contribution limit is $11,25",
+                                f"For {year}, this higher catch-up contribution limit is $11,50", 1)
+            text = re.sub(r"(these plans\. )For 2026, (this higher catch-up contribution limit is \$)11,250",
+                          rf"\1For {year}, \g<2>11,500", text, count=1)
+        if name == "irs_simple":
+            text = text.replace("For 2026, this higher catch-up contribution limit is $5,250",
+                                f"For {year}, this higher catch-up contribution limit is $5,350")
+        out[name] = (text, tables)
+    return out
+
+
+def pages_2026():
+    return {n: fixture(n) for n in ("irs_cola", "irs_simple", "irs_p969", "irs_gift")}
+
+
 class Cra(unittest.TestCase):
-    def test_reads_year(self):
-        t = U.parse_html(CRA_HTML)[1]
-        self.assertEqual(U.cra_limits(t, 2027), {"RRSP": 34400, "TFSA": 7000})
-        self.assertEqual(U.cra_limits(t, 2026)["RRSP"], 33810)
-    def test_not_ready(self):
-        with self.assertRaises(U.NotReady): U.cra_limits(U.parse_html(CRA_NO_YEAR)[1], 2027)
+    def test_reads_2026(self):
+        self.assertEqual(U.cra_limits(fixture("cra")[1], 2026), {"RRSP": 33810, "TFSA": 7000})
+
+    def test_not_ready_when_tfsa_missing(self):
+        with self.assertRaises(U.NotReady):
+            U.cra_limits(fixture("cra")[1], 2027)  # CRA lists the 2027 RRSP row but not the TFSA one yet
+
     def test_layout_change(self):
-        with self.assertRaises(U.Failure): U.cra_limits(U.parse_html("<table><tr><td>x</td></tr></table>")[1], 2027)
+        with self.assertRaises(U.Failure):
+            U.cra_limits(U.parse_html("<table><tr><td>x</td></tr></table>")[1], 2027)
 
-class Irs(unittest.TestCase):
-    def setUp(self): self.orig = U.call_model
-    def tearDown(self): U.call_model = self.orig
-    def fake(self, answer): U.call_model = lambda m: json.dumps(answer)
-    def test_snippets_filter(self):
-        s = U.snippets("Intro. " + IRS["retirement"] + " Unrelated 2027 $5 thing about cats.", 2027, "retirement")
-        self.assertIn("$25,000", s); self.assertNotIn("cats", s)
-    def test_ok(self):
-        self.fake(FAKE_ANSWER)
-        got = U.irs_limits(IRS["retirement"], 2027, [k for k in U.FIELDS if U.FIELDS[k][3] == "retirement"])
-        self.assertEqual(got["k401_annual"], 25000)
-    def test_hallucination_rejected(self):
-        self.fake(dict(FAKE_ANSWER, k401_annual=26000))
-        with self.assertRaises(U.Failure): U.irs_limits(IRS["retirement"], 2027, ["k401_annual"])
-    def test_null_is_fine(self):
-        self.fake({"hsa_self": None})
-        self.assertEqual(U.irs_limits(IRS["retirement"] + " HSA 2027 $5.", 2027, ["hsa_self"]), {})
 
-class Merge(unittest.TestCase):
-    def test_entry(self):
-        data = base_data()
-        cents = {("TFSA", "annualCents"): 700000, ("RRSP", "annualCents"): 3440000,
-                 ("IRA", "annualCents"): 775000, ("K401", "annualCents"): 2500000, ("SEP", "annualCents"): 7300000,
-                 ("K401", "catchUpCents"): 800000, ("K401", "superCatchUpCents"): 1125000}
-        e, missing = U.build_entry(data, 2027, cents)
-        self.assertEqual(e["K457"]["annualCents"], 2500000)       # derived from 401(k)
-        self.assertEqual(e["SOLO401K"]["annualCents"], 7300000)   # derived from 415(c)
-        self.assertEqual(e["FHSA"], data["years"]["2026"]["FHSA"])  # fixed by law, carried
-        self.assertIn("hsa_self", missing)
-        self.assertEqual(e["HSA"]["annualCents"], data["years"]["2026"]["HSA"]["annualCents"])
-    def test_implausible(self):
-        data = base_data()
-        with self.assertRaises(U.Failure): U.build_entry(data, 2027, {("K401", "annualCents"): 250000})
+class Us(unittest.TestCase):
+    def test_2026_matches_limits_json(self):
+        found, missing = U.us_limits(pages_2026(), 2026)
+        self.assertEqual(missing, [])
+        known = base_data()["years"]["2026"]
+        for k, (acct, field, _) in U.FIELDS.items():
+            if k == "fsa_health":
+                continue  # the saved Publication 969 only states 2025 for the health FSA
+            self.assertEqual(found[k], known[acct][field] // 100, k)
 
-class EndToEnd(unittest.TestCase):
+    def test_future_year_is_not_ready(self):
+        found, missing = U.us_limits(pages_2026(), 2027)
+        self.assertEqual(found, {})
+        self.assertIn("ira_annual", missing)
+
+    def test_cross_check_failure(self):
+        pages = bump(pages_2026(), 2027)
+        for t in pages["irs_cola"][1]:
+            if t[0][0].startswith("Other"):
+                for r in t[1:]:
+                    if r[0].startswith("457 elective"):
+                        r[1] = "$30,000"
+        with self.assertRaises(U.Failure):
+            U.us_limits(pages, 2027)
+
+    def test_layout_change_is_failure(self):
+        pages = pages_2026()
+        pages["irs_cola"] = (pages["irs_cola"][0], [])
+        with self.assertRaises(U.Failure):
+            U.us_limits(pages, 2026)
+
+
+class Run(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.path = os.path.join(self.tmp, "limits.json")
-        json.dump(base_data(), open(self.path, "w"), indent=2)
-        self.o = (U.LIMITS_PATH, U.REPORT_PATH, U.fetch, U.call_model, U.IRS_PAGES)
-        U.LIMITS_PATH, U.REPORT_PATH = self.path, os.path.join(self.tmp, "r.md")
-        U.IRS_PAGES = ["https://irs.example/a"]
-        U.fetch = lambda url: CRA_HTML if "canada" in url else "<p>" + IRS["retirement"] + "</p>"
-        U.call_model = lambda m: json.dumps(FAKE_ANSWER)
-    def tearDown(self): U.LIMITS_PATH, U.REPORT_PATH, U.fetch, U.call_model, U.IRS_PAGES = self.o
-    def test_publishes_and_reports(self):
-        # model answers every key it is asked for with FAKE_ANSWER (extra keys ignored by design); health/gift groups find no snippets
-        self.assertTrue(U.run(today=datetime.date(2026, 11, 15)))
-        d = json.load(open(self.path))
-        self.assertEqual(d["years"]["2027"]["RRSP"]["annualCents"], 3440000)
-        self.assertEqual(d["updated"], "2026-11-15")
-        self.assertIn("hsa_self", d["carried"]["2027"])
-        self.assertTrue(os.path.exists(U.REPORT_PATH))
-    def test_before_september_does_nothing(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(base_data(), f)
+        self.old = (U.LIMITS_PATH, U.REPORT_PATH, U.load_page, U.fetch)
+        U.LIMITS_PATH, U.REPORT_PATH = self.path, os.path.join(self.tmp, "report.md")
+        self.pages = bump(pages_2026(), 2027)
+        U.load_page = lambda name: self.pages[name]
+        cra = copy.deepcopy(fixture("cra")[1])
+        cra[1].insert(1, ["2027", "$7,000", "$170,000"])  # TFSA 2027 now published
+        self.cra = cra
+        U.fetch = lambda url: "CRA"
+        self.orig_parse = U.parse_html
+        U.parse_html = lambda markup: ("", self.cra)
+
+    def tearDown(self):
+        U.LIMITS_PATH, U.REPORT_PATH, U.load_page, U.fetch = self.old
+        U.parse_html = self.orig_parse
+
+    def years(self):
+        with open(self.path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_not_due_before_september(self):
         self.assertFalse(U.run(today=datetime.date(2026, 8, 31)))
-    def test_not_ready_quiet(self):
-        U.fetch = lambda url: CRA_NO_YEAR if "canada" in url else "<p>nothing</p>"
-        self.assertFalse(U.run(today=datetime.date(2026, 10, 5)))
+        self.assertNotIn("2027", self.years()["years"])
+
+    def test_publishes_next_year(self):
+        self.assertTrue(U.run(today=datetime.date(2026, 11, 5)))
+        d = self.years()
+        y = d["years"]["2027"]
+        self.assertEqual(y["TFSA"]["annualCents"], 700000)
+        self.assertEqual(y["RRSP"]["annualCents"], 3539000)  # CRA 2027 row in the saved page
+        self.assertGreater(y["K401"]["annualCents"], 2450000)
+        self.assertEqual(y["K457"]["annualCents"], y["K401"]["annualCents"])
+        self.assertEqual(y["SOLO401K"]["annualCents"], y["SEP"]["annualCents"])
+        self.assertEqual(y["FHSA"], d["years"]["2026"]["FHSA"])          # fixed by law, copied forward
+        self.assertEqual(y["FSA"], d["years"]["2026"]["FSA"])            # not announced, carried
+        self.assertIn("fsa_health", d["carried"]["2027"])
+        self.assertTrue(os.path.exists(U.REPORT_PATH))
+
+    def test_waits_when_irs_not_ready(self):
+        self.pages = pages_2026()
+        self.assertFalse(U.run(today=datetime.date(2026, 10, 10)))
+        self.assertNotIn("2027", self.years()["years"])
+
     def test_overdue_fails(self):
-        U.fetch = lambda url: CRA_NO_YEAR if "canada" in url else "<p>nothing</p>"
-        with self.assertRaises(U.Failure): U.run(today=datetime.date(2027, 1, 20))
-    def test_bad_number_blocks_publish(self):
-        U.call_model = lambda m: json.dumps(dict(FAKE_ANSWER, ira_annual=9999))
-        with self.assertRaises(U.Failure): U.run(today=datetime.date(2026, 11, 15))
-        self.assertNotIn("2027", json.load(open(self.path))["years"])
+        self.pages = pages_2026()
+        with self.assertRaises(U.Failure):
+            U.run(today=datetime.date(2027, 1, 16))
+
+    def test_next_year_after_that(self):
+        U.run(today=datetime.date(2026, 11, 5))
+        self.assertFalse(U.run(today=datetime.date(2026, 11, 6)))  # 2028 is not due until Sept 2027
+
 
 if __name__ == "__main__":
-    unittest.main(verbosity=1)
+    unittest.main()

@@ -27,11 +27,11 @@ The `CNAME` file is already set to `contributionroom.wealthboardapp.com`. In you
 
 `.github/workflows/update-limits.yml` runs every day. From 1 September it checks the official pages for next year's limits:
 - **Canada (TFSA, RRSP):** read from the CRA's limits table.
-- **US (IRA, 401(k), SIMPLE, SEP, HSA, FSA, ...):** short snippets of IRS pages are read by GitHub Models (free, uses the built-in token). Every number must appear word for word in those snippets and be a plausible step from last year.
-- **Fixed by law** (FHSA, RESP, RDSP, Coverdell, catch-up ages) are copied forward. 457(b), Solo 401(k) and ABLE follow the 401(k), 415(c) and gift-exclusion numbers.
-- Nothing is published until every required number is found and checked. HSA, FSA, dependent care and the gift exclusion are copied forward if their page is not updated yet, listed under `"carried"` in `limits.json`, retried daily, and an issue is opened so you know.
+- **US (IRA, 401(k), SIMPLE, SEP, 457(b), HSA, health FSA, gift exclusion):** read by fixed rules (no AI, no paid service) from the IRS COLA table (one column per year), IRS Publication 969 and the IRS gift-tax page. Numbers that must agree (457(b) = 401(k), 415(c) = SEP) are cross-checked, and every number must be a plausible step from last year.
+- **Fixed by law** (FHSA, RESP, RDSP, Coverdell, dependent-care FSA, catch-up ages) are copied forward. 457(b), Solo 401(k) and ABLE follow the 401(k), 415(c) and gift-exclusion numbers.
+- Nothing is published until every required number is found and checked. HSA, health FSA and the gift exclusion are copied forward if their page is not updated yet, listed under `"carried"` in `limits.json`, retried daily, and an issue is opened so you know.
 - If something looks wrong, the run fails and GitHub emails you. If a year is still missing after 15 January, it fails too.
 
 Try it by hand: **Actions > Update contribution limits > Run workflow** (leave "Check only" ticked). Run the tests with `python3 scripts/test_update_limits.py`.
-If an IRS page moves, edit `IRS_PAGES` at the top of `scripts/update_limits.py`.
+If an IRS page moves, edit `PAGES` at the top of `scripts/update_limits.py`.
 Make sure **Settings > Actions > General** allows workflows, and that your GitHub notification settings send failed workflow emails.
