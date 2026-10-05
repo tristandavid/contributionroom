@@ -21,4 +21,17 @@ The `CNAME` file is already set to `contributionroom.wealthboardapp.com`. In you
 
 ## Connect the apps
 - **Already wired:** the apps use `https://contributionroom.wealthboardapp.com/privacy`, `/terms` and `/limits.json`.
-- **Automatic limits updates:** `limits.json` here is a copy of the one bundled in the apps. When a limit changes, edit `limits.json`, bump its `updated` date, commit, and every installed app picks it up. Keep it valid JSON with `"schema": 1`.
+- **Limits updates:** `limits.json` here is what the apps download (once a day). A GitHub Action adds each new year automatically, see below. You can still edit it by hand: bump `updated`, commit, keep it valid JSON with `"schema": 1`.
+
+## Automatic yearly limits
+
+`.github/workflows/update-limits.yml` runs every day. From 1 September it checks the official pages for next year's limits:
+- **Canada (TFSA, RRSP):** read from the CRA's limits table.
+- **US (IRA, 401(k), SIMPLE, SEP, HSA, FSA, ...):** short snippets of IRS pages are read by GitHub Models (free, uses the built-in token). Every number must appear word for word in those snippets and be a plausible step from last year.
+- **Fixed by law** (FHSA, RESP, RDSP, Coverdell, catch-up ages) are copied forward. 457(b), Solo 401(k) and ABLE follow the 401(k), 415(c) and gift-exclusion numbers.
+- Nothing is published until every required number is found and checked. HSA, FSA, dependent care and the gift exclusion are copied forward if their page is not updated yet, listed under `"carried"` in `limits.json`, retried daily, and an issue is opened so you know.
+- If something looks wrong, the run fails and GitHub emails you. If a year is still missing after 15 January, it fails too.
+
+Try it by hand: **Actions > Update contribution limits > Run workflow** (leave "Check only" ticked). Run the tests with `python3 scripts/test_update_limits.py`.
+If an IRS page moves, edit `IRS_PAGES` at the top of `scripts/update_limits.py`.
+Make sure **Settings > Actions > General** allows workflows, and that your GitHub notification settings send failed workflow emails.

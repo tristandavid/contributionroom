@@ -1,0 +1,83 @@
+name: Update contribution limits
+
+# Every day, checks the official CRA and IRS pages for next year's contribution limits and, once they are published and pass
+# the safety checks in scripts/update_limits.py, commits the new year to limits.json. GitHub Pages then serves it and every
+# installed app picks it up within a day. A failed run emails you (GitHub's default for scheduled workflows).
+on:
+  schedule:
+    - cron: "23 13 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Check only. Do not change limits.json."
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # commit limits.json
+  models: read      # free GitHub Models service, used to read the IRS pages
+  issues: write     # note when a number had to be carried forward
+  actions: write    # keeps this schedule from being switched off after 60 quiet days
+
+concurrency:
+  group: update-limits
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the offline tests
+        run: python3 scripts/test_update_limits.py
+
+      - name: Check the official sources
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/update_limits.py ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+
+      - name: Make sure limits.json is still valid
+        run: |
+          python3 - <<'PY'
+          import json
+          d = json.load(open("limits.json", encoding="utf-8"))
+          assert d["schema"] == 1 and d["years"] and d["deadlines"], "limits.json is missing required parts"
+          latest = max(d["years"], key=int)
+          assert len(d["years"][latest]) >= 17, f"{latest} has too few accounts"
+          print("limits.json OK, latest year", latest)
+          PY
+
+      - name: Commit the update
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: |
+          if git diff --quiet -- limits.json; then
+            echo "No change to publish."
+          else
+            git config user.name "contribution-room-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add limits.json
+            git commit -m "Update contribution limits (automatic)"
+            git push
+          fi
+
+      - name: Open an issue when numbers were carried forward
+        if: ${{ hashFiles('.limits-report.md') != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          open=$(gh issue list --state open --search "Carried-forward limits in:title" --json number --jq length)
+          if [ "$open" = "0" ]; then
+            gh issue create --title "Carried-forward limits (automatic check)" --body-file .limits-report.md
+          fi
+
+      - name: Keep this schedule switched on
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/update-limits.yml/enable"
