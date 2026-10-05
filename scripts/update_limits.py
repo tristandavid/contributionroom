@@ -442,7 +442,41 @@ def write_report(data):
         fh.write("\n".join(lines) + "\n")
 
 
+def verify(year):
+    """Read-only self-check: extract `year` from the live sources and compare with what limits.json already holds."""
+    with open(LIMITS_PATH, encoding="utf-8") as fh:
+        known = json.load(fh)["years"].get(str(year))
+    if not known:
+        raise Failure(f"limits.json has no {year} to compare with.")
+    cra = cra_limits(parse_html(fetch(CRA_URL))[1], year)
+    say(f"CRA {year}: RRSP {cra['RRSP']:,} (file {known['RRSP']['annualCents'] // 100:,}), "
+        f"TFSA {cra['TFSA']:,} (file {known['TFSA']['annualCents'] // 100:,})")
+    texts, loaded = [], 0
+    for url in IRS_PAGES:
+        try:
+            texts.append(parse_html(fetch(url))[0])
+            loaded += 1
+        except OSError as e:
+            say(f"IRS page not loaded: {url} ({e})", "warning")
+    joined = "\n".join(texts)
+    say(f"IRS pages loaded: {loaded} of {len(IRS_PAGES)}. Mentions {year}: {str(year) in joined}.")
+    found = irs_limits(joined, year, list(FIELDS))
+    for k, (acct, field, required, _) in FIELDS.items():
+        want = known[acct][field] // 100
+        got = found.get(k)
+        status = "MATCH" if got == want else ("not found" if got is None else "DIFFERENT")
+        say(f"{k}: found {got} / file {want} -> {status}" + (" (required)" if required and got is None else ""),
+            "notice" if status == "MATCH" else "warning")
+
+
 def main(argv):
+    if "--verify" in argv:
+        try:
+            verify(int(argv[argv.index("--verify") + 1]))
+            return 0
+        except (Failure, NotReady, OSError) as e:
+            say(f"VERIFY FAILED: {e}", "error")
+            return 1
     try:
         run(dry_run="--dry-run" in argv)
     except Failure as e:
