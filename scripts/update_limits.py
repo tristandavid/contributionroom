@@ -88,6 +88,13 @@ SNIPPET_CAP = 9000  # characters per model call, so it fits the free tier's smal
 PLAUSIBLE = (0.85, 1.6)  # new value / last year's value
 
 
+def say(message, level="notice"):
+    """Prints a line. On GitHub it also shows as an annotation at the top of the run page."""
+    print(message)
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"::{level}::{message}")
+
+
 class NotReady(Exception):
     """The official sources do not show the new year yet. Normal; try again tomorrow."""
 
@@ -379,7 +386,7 @@ def run(today=None, dry_run=False):
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
     for line in log or ["Nothing to do."]:
-        print(line)
+        say(line)
     return changed
 
 
@@ -387,7 +394,9 @@ def gather_new(data, year):
     prev_key = str(year - 1)
     prev = data["years"].get(prev_key) or data["years"][max(data["years"], key=int)]
     cents, warnings = {}, []
-    cra = cra_limits(parse_html(fetch(CRA_URL))[1], year)
+    cra_tables = parse_html(fetch(CRA_URL))[1]
+    say(f"CRA page loaded: {len(cra_tables)} tables found.")
+    cra = cra_limits(cra_tables, year)
     cents[("TFSA", "annualCents")] = cra["TFSA"] * 100
     cents[("RRSP", "annualCents")] = cra["RRSP"] * 100
     texts = []
@@ -396,6 +405,7 @@ def gather_new(data, year):
             texts.append(parse_html(fetch(url))[0])
         except OSError as e:
             warnings.append(f"Could not load {url} ({e}).")
+            say(f"Could not load {url} ({e}).", "warning")
     joined = "\n".join(texts)
     if str(year) not in joined:
         raise NotReady(f"The IRS pages do not mention {year} yet.")
@@ -436,10 +446,10 @@ def main(argv):
     try:
         run(dry_run="--dry-run" in argv)
     except Failure as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        say(f"ERROR: {e}", "error")
         return 1
     except OSError as e:
-        print(f"ERROR: could not reach an official source: {e}", file=sys.stderr)
+        say(f"ERROR: could not reach an official source: {e}", "error")
         return 1
     return 0
 
