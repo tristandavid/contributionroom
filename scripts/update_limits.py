@@ -239,7 +239,13 @@ def call_model(messages):
     for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=90) as r:
-                return json.loads(r.read())["choices"][0]["message"]["content"]
+                raw = r.read()
+                status = r.status
+            try:
+                return json.loads(raw)["choices"][0]["message"]["content"]
+            except (ValueError, KeyError, IndexError, TypeError):
+                last = f"HTTP {status}, unexpected body: {raw[:300]!r}"
+                break
         except urllib.error.HTTPError as e:
             last = f"HTTP {e.code} {e.read()[:200]!r}"
             if e.code not in (429, 500, 502, 503, 504):
