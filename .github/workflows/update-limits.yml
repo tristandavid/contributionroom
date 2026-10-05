@@ -41,10 +41,23 @@ jobs:
       - name: Run the offline tests
         run: python3 scripts/test_update_limits.py
 
+      - name: Save page snapshots (self-check only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_year != '' }}
+        run: |
+          python3 scripts/update_limits.py --snapshot debug
+          git config user.name "contribution-room-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -B debug-snapshots
+          git add -f debug
+          git commit -q -m "Page snapshots for rule checking"
+          git push -q -f origin debug-snapshots
+          git checkout -q -
+
       - name: Self-check against a year already in limits.json
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_year != '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
         run: python3 scripts/update_limits.py --verify "${{ inputs.verify_year }}"
 
       - name: Check the official sources

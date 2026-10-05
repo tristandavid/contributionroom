@@ -475,7 +475,23 @@ def verify(year):
             "notice" if status == "MATCH" else "warning")
 
 
+def snapshot(folder):
+    """Saves what the script sees on each official page (text and tables) so rules can be checked against real pages."""
+    os.makedirs(folder, exist_ok=True)
+    for i, url in enumerate([CRA_URL] + IRS_PAGES):
+        try:
+            text, tables = parse_html(fetch(url))
+        except OSError as e:
+            text, tables = f"NOT LOADED: {e}", []
+        text = re.sub(r"\n\s*\n+", "\n", text)
+        with open(os.path.join(folder, f"{i:02d}.txt"), "w", encoding="utf-8") as fh:
+            fh.write(f"URL: {url}\n\n{text}\n\nTABLES:\n{json.dumps(tables, indent=0, ensure_ascii=False)}\n")
+
+
 def main(argv):
+    if "--snapshot" in argv:
+        snapshot(argv[argv.index("--snapshot") + 1])
+        return 0
     if "--verify" in argv:
         try:
             verify(int(argv[argv.index("--verify") + 1]))
