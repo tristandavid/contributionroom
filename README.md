@@ -15,7 +15,7 @@ The `CNAME` file is already set to `contributionroom.wealthboardapp.com`. In you
 2. At your DNS provider, point the domain at GitHub Pages (a `CNAME` record to `<your-user>.github.io` for a subdomain, or the four GitHub Pages `A` records for a root domain). Tick **Enforce HTTPS** when it is offered.
 
 ## Before you launch
-- Search for `[DATE]`, `[YOUR NAME OR COMPANY]` and `[YOUR PROVINCE OR STATE AND COUNTRY]` (they are highlighted on the pages) and replace them.
+- Replace `[YOUR PROVINCE OR STATE AND COUNTRY]` in terms.html (highlighted on the page). The date and company name are filled in.
 - Replace the two disabled store buttons in `index.html` with your Google Play and App Store links.
 - Have the privacy policy and terms checked by someone qualified. They describe what the app does today (on-device data, no analytics, store billing). If you add analytics, ads or a server, update them first.
 
