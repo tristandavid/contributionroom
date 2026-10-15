@@ -1,0 +1,43 @@
+name: Capture tax pages (temporary)
+on:
+  push:
+    branches: [tax-brackets]
+    paths: [".github/workflows/capture-tax-pages.yml"]
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Save the pages as test fixtures
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, "scripts")
+          import update_limits as U
+          pages = {
+            "cra_rates": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/canadian-income-tax-rates-individuals-current-previous-years.html",
+            "cra_index": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/adjustment-personal-income-tax-benefit-amounts.html",
+            "irs_brackets": "https://www.irs.gov/filing/federal-income-tax-rates-and-brackets",
+          }
+          os.makedirs("scripts/fixtures/raw", exist_ok=True)
+          for name, url in pages.items():
+              try:
+                  raw = U.fetch(url)
+              except Exception as e:
+                  print("FAILED", name, e); continue
+              open(f"scripts/fixtures/raw/{name}.html", "w").write(raw)
+              text, tables = U.parse_html(raw)
+              json.dump({"text": text, "tables": tables}, open(f"scripts/fixtures/{name}.json", "w"), ensure_ascii=False)
+              print(name, len(raw), len(tables))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "contribution-room-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/fixtures
+          git commit -m "Capture tax pages (temporary)" && git push || echo nothing
