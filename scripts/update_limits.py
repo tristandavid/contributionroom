@@ -7,6 +7,8 @@ No AI, no paid service. Every number is read by fixed rules from an official pag
     plus the one sentence on each page that states the 60-63 "super" catch-up.
   * US health and gift (HSA, health FSA, gift exclusion): one sentence or table row each, from IRS Publication 969 and the
     IRS gift-tax page.
+  * Tax brackets for the refund estimate (the "tax" section): CRA payroll tables, the CRA indexation page and the IRS
+    inflation-adjustment release. Details and the Quebec exception are in the "Tax brackets" section below.
 How it stays safe
   * A new year is only created when every REQUIRED field is found. Missing or reworded pages mean "not ready", never a guess.
   * Numbers that must agree (457(b) = 401(k), 415(c) limit = SEP) are checked against each other, and every number must be a
@@ -160,33 +162,6 @@ def fetch(url):
 def dollars(cell):
     m = re.search(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", cell or "")
     return int(round(float(m.group(1).replace(",", "")))) if m else None
-
-
-# ---------------------------------------------------------------- Canada (CRA table, no AI)
-
-def cra_limits(tables, year):
-    """Returns {'TFSA': dollars, 'RRSP': dollars}. Raises Failure if the table layout changed, NotReady if the year is absent."""
-    out = {}
-    for name in ("RRSP", "TFSA"):
-        found_table = False
-        for rows in tables:
-            header = next((r for r in rows if r and re.search(r"year", r[0], re.I) and any(name in c.upper() for c in r)), None)
-            if header is None:
-                continue
-            found_table = True
-            col = next(i for i, c in enumerate(header) if name in c.upper() and i > 0)
-            row = next((r for r in rows if r and r[0].strip() == str(year)), None)
-            if row is None or col >= len(row):
-                break
-            v = dollars(row[col])
-            if v:
-                out[name] = v
-            break
-        if not found_table:
-            raise Failure(f"CRA page: could not find the {name} table. The page layout probably changed.")
-    if len(out) < 2:
-        raise NotReady(f"CRA table has no {year} row for {', '.join(n for n in ('RRSP', 'TFSA') if n not in out)} yet.")
-    return out
 
 
 # ---------------------------------------------------------------- Canada (CRA table, no AI)
@@ -388,6 +363,10 @@ def run(today=None, dry_run=False):
         changed = True
         log.append(f"{year}: filled in {', '.join(found)}.")
 
+    # 3) Tax brackets for the refund estimate.
+    if update_tax(data, today, log):
+        changed = True
+
     if not carried:
         data.pop("carried", None)
     write_report(data)
@@ -452,6 +431,355 @@ def verify(year):
         status = "MATCH" if got == want else ("not found" if got is None else "DIFFERENT")
         say(f"{k}: found {got} / file {want} -> {status}" + (" (required)" if required and got is None else ""),
             "notice" if status == "MATCH" else "warning")
+
+
+# ---------------------------------------------------------------- Tax brackets (for the refund estimate)
+#
+# limits.json "tax" holds one entry per year. A new year is added once its official numbers are out:
+#   * Canada, federal and every province except Quebec: brackets and rates from the CRA payroll formulas (T4127, January
+#     edition, table 8.1), basic personal amounts and the Ontario surtax from table 8.2, the federal basic personal amount
+#     from the CRA indexation page. The T4127 tables come out in November or December for the next January.
+#   * Quebec: Revenu Quebec blocks automated readers, so Quebec is carried forward with its thresholds and basic personal
+#     amount indexed by the federal indexation rate (Quebec's own rate is usually within a few hundredths of a percent).
+#     Rates stay as they were. An issue is opened so a person can glance at it.
+#   * US: the IRS news release "tax inflation adjustments for tax year YYYY" (October or November), which states every
+#     bracket in one fixed sentence pattern for single filers and married couples filing jointly.
+# During the year, the CRA "current year tax rates" page is re-read every day. If a province changes its brackets mid-year
+# (a budget), the year's entry is corrected from that page.
+
+TAX_PAGES = {
+    "cra_index": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/adjustment-personal-income-tax-benefit-amounts.html",
+    "cra_year": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html",
+    "t4127": "https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas/t4127-jan.html",
+    "t4127_csv": "https://www.canada.ca/content/dam/cra-arc/formspubs/pub/t4127-jan/{kind}-01-{yy}e.csv",
+    "irs_brackets": "https://www.irs.gov/filing/federal-income-tax-rates-and-brackets",
+    "irs_newsroom": "https://www.irs.gov/newsroom",
+    "irs_news_releases": "https://www.irs.gov/newsroom/news-releases-for-current-month",
+    "irs_release_guess": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-{year}",
+}
+T4127_RATES, T4127_OTHER = "rtsncmtrshldcnstnt", "thrrtsmnts"
+PROVINCES = [  # code, name as the CRA writes it; the order apps show them in
+    ("AB", "Alberta"), ("BC", "British Columbia"), ("MB", "Manitoba"), ("NB", "New Brunswick"),
+    ("NL", "Newfoundland and Labrador"), ("NS", "Nova Scotia"), ("NT", "Northwest Territories"), ("NU", "Nunavut"),
+    ("ON", "Ontario"), ("PE", "Prince Edward Island"), ("QC", "Quebec"), ("SK", "Saskatchewan"), ("YT", "Yukon"),
+]
+TAX_DUE = (9, 1)        # start looking for next year's brackets on September 1
+TAX_OVERDUE = (2, 1)    # fail (and email) if the year's brackets are still missing on February 1 of that year
+TAX_NOTES_PATH = os.path.join(ROOT, ".tax-notes.md")
+
+
+def _num(cell):
+    """'58,523' / '$1,141,275.01' / '142,520*' / '0.205' -> float, or None for blanks and symbols such as BPAF."""
+    m = re.fullmatch(r"\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*\*?\s*", cell or "")
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def _pct(fraction):
+    return round(fraction * 100, 4)
+
+
+def _csv(raw):
+    import csv, io
+    return [[c.strip() for c in row] for row in csv.reader(io.StringIO(raw))]
+
+
+def t4127_brackets(raw, year):
+    """Table 8.1 of the T4127 CSV -> {code: [[from_dollars, rate_pct], ...]} for FED and the provinces (not Quebec)."""
+    rows = _csv(raw)
+    if not rows or not any("Table 8.1" in c for c in rows[0]):
+        raise Failure("T4127 table 8.1: unexpected layout (first row is not the table title).")
+    if not re.search(rf"\bfor {year}\b", " ".join(rows[0])):
+        raise NotReady(f"T4127 table 8.1 is not for {year} yet.")
+    out, code = {}, None
+    for i, r in enumerate(rows[1:], 1):
+        if len(r) < 3:
+            continue
+        if r[1] == "A":
+            code = "FED" if r[0] == "Federal" else r[0]
+            thresholds = [_num(c) for c in r[2:] if c]
+            rates_row = rows[i + 1] if i + 1 < len(rows) else []
+            if len(rates_row) < 3 or rates_row[1] not in ("R", "V"):
+                raise Failure(f"T4127 table 8.1: no rate row after {code}.")
+            rates = [_num(c) for c in rates_row[2:2 + len(thresholds)]]
+            if None in thresholds or None in rates or thresholds[0] != 0:
+                raise Failure(f"T4127 table 8.1: unreadable numbers for {code}.")
+            out[code] = [[int(round(t)), _pct(v)] for t, v in zip(thresholds, rates)]
+    want = {"FED"} | {c for c, _ in PROVINCES if c != "QC"}
+    if set(out) != want:
+        raise Failure(f"T4127 table 8.1: expected {sorted(want)}, found {sorted(out)}.")
+    return out
+
+
+def t4127_other(raw, year):
+    """Table 8.2 -> ({code: basic personal amount or None when given as a formula}, ontario_surtax, quebec_abatement_pct)."""
+    rows = _csv(raw)
+    if not rows or not any("Table 8.2" in c for c in rows[0]):
+        raise Failure("T4127 table 8.2: unexpected layout (first row is not the table title).")
+    if not re.search(rf"\bfor {year}\b", " ".join(rows[0])):
+        raise NotReady(f"T4127 table 8.2 is not for {year} yet.")
+    header = rows[1]
+    try:
+        col_basic, col_t4, col_v1, col_ab = (header.index(h) for h in ("Basic amount", "T4 to V1", "V1 rate", "Abatement"))
+    except ValueError:
+        raise Failure(f"T4127 table 8.2: header changed: {header}")
+    bpa, surtax, abatement, code = {}, [], None, None
+    for r in rows[2:]:
+        if len(r) <= col_ab:
+            continue
+        if r[0]:
+            code = "FED" if r[0] == "Federal" else r[0]
+            if code == "Outside Canada":
+                code = None
+                continue
+            v = _num(r[col_basic])
+            bpa[code] = int(round(v)) if v else None
+            if code == "QC":
+                abatement = _num(r[col_ab])
+        if code == "ON":
+            t, rate = _num(r[col_t4]), _num(r[col_v1])
+            if t and rate:
+                surtax.append([int(round(t)), _pct(rate)])
+    missing = ({"FED"} | {c for c, _ in PROVINCES}) - set(bpa)
+    if missing:
+        raise Failure(f"T4127 table 8.2: no row for {sorted(missing)}.")
+    if not surtax or abatement is None:
+        raise Failure("T4127 table 8.2: Ontario surtax or Quebec abatement not found.")
+    return bpa, surtax, _pct(abatement)
+
+
+def cra_index_values(tables, year):
+    """From the CRA indexation page: (federal basic personal amount, indexation percent) for `year`."""
+    bpa = rate = None
+    for t in tables:
+        if not t or str(year) not in t[0]:
+            continue
+        col = t[0].index(str(year))
+        for r in t[1:]:
+            if len(r) <= col:
+                continue
+            if re.match(r"Basic personal amount \(maximum\)", r[0]):
+                bpa = dollars(r[col])
+            elif re.match(r"Indexation increase", r[0]):
+                m = re.search(r"([0-9.]+)\s*%", r[col])
+                rate = float(m.group(1)) if m else None
+    if bpa is None or rate is None:
+        raise NotReady(f"The CRA indexation page does not show the {year} basic personal amount and indexation rate yet.")
+    return bpa, rate
+
+
+def cra_year_brackets(text, tables, year):
+    """The CRA 'current year tax rates' page -> {code: brackets} when it is for `year`, else None."""
+    if not re.search(rf"Current year tax rates and income brackets \({year}\)", text):
+        return None
+    order = [("FED", "Federal rate")] + [(c, f"{n} rate") for c, n in PROVINCES if c != "QC"]
+    pos = [text.find(f"{label}: {year}") for _, label in order]
+    if -1 in pos:
+        raise Failure("CRA current-year page: a federal or provincial section is missing.")
+    order = [o for _, o in sorted(zip(pos, order))]  # the page's own order (alphabetical by English name)
+    bracket_tables = [t for t in tables if len(t) > 2 and t[1][:3] == ["from", "up to", "is taxed at"]]
+    if len(bracket_tables) != len(order):
+        raise Failure(f"CRA current-year page: expected {len(order)} bracket tables, found {len(bracket_tables)}.")
+    out = {}
+    for (code, _), t in zip(order, bracket_tables):
+        rows = []
+        for r in t[2:]:
+            frm, rate = _num(r[0]), re.fullmatch(r"\s*([0-9.]+)\s*%\s*", r[2] or "")
+            if frm is None or not rate:
+                raise Failure(f"CRA current-year page: unreadable row {r} for {code}.")
+            rows.append([int(frm), float(rate.group(1))])  # "58,523.01" -> 58523, the same threshold the T4127 uses
+        if rows[0][0] != 0:
+            raise Failure(f"CRA current-year page: {code} does not start at $0.")
+        out[code] = rows
+    return out
+
+
+US_RATE = r"(\d+(?:\.\d+)?)% for (?:individual single taxpayers with )?incomes (?:greater than|over) \$([\d,]+) \(\$([\d,]+) for married couples filing jointly\)"
+
+
+def irs_release_brackets(text, year):
+    """The IRS inflation-adjustment release -> (single, joint) brackets, or None when this is not the release for `year`."""
+    text = re.sub(r"\s+", " ", text)
+    start = text.find(f"For tax year {year}, the top tax rate")
+    if start < 0:
+        return None
+    para = text[start:start + 1500]
+    found = [(float(r), int(s.replace(",", "")), int(j.replace(",", ""))) for r, s, j in re.findall(US_RATE, para)]
+    low = re.search(r"The lowest rate is (\d+(?:\.\d+)?)%", para)
+    if len(found) < 5 or not low:
+        raise Failure(f"IRS {year} release: the marginal-rates paragraph changed and could not be read.")
+    found.sort(key=lambda x: x[1])
+    single = [[0, float(low.group(1))]] + [[s, r] for r, s, _ in found]
+    joint = [[0, float(low.group(1))]] + [[j, r] for r, _, j in sorted(found, key=lambda x: x[2])]
+    return single, joint
+
+
+def _links(raw, pattern):
+    out = []
+    for href in re.findall(r'href="([^"#]+)"', raw or ""):
+        if re.search(pattern, href, re.I):
+            out.append(href if href.startswith("http") else "https://www.irs.gov" + href)
+    return out
+
+
+def _try_fetch(url):
+    try:
+        return fetch(url)
+    except OSError:
+        return None
+
+
+def us_tax(year):
+    """Finds and reads the IRS inflation-adjustment release for `year`. Raises NotReady until it is out."""
+    candidates = []
+    for name in ("irs_brackets", "irs_newsroom", "irs_news_releases"):
+        candidates += _links(_try_fetch(TAX_PAGES[name]), rf"inflation-adjustments?-for-tax-year-{year}")
+    candidates.append(TAX_PAGES["irs_release_guess"].format(year=year))
+    seen = set()
+    for url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        raw = _try_fetch(url)
+        if not raw:
+            continue
+        got = irs_release_brackets(parse_html(raw)[0], year)
+        if got:
+            return got
+    raise NotReady(f"The IRS has not published its tax year {year} inflation adjustments yet.")
+
+
+def t4127_csv(kind, year):
+    """Finds a T4127 CSV for January of `year`: the link on the T4127 page if it is there, else the usual file name."""
+    links = [u if u.startswith("http") else "https://www.canada.ca" + u
+             for u in re.findall(rf'href="([^"]*{kind}-01-{year % 100:02d}e\.csv)"', _try_fetch(TAX_PAGES["t4127"]) or "")]
+    for url in links + [TAX_PAGES["t4127_csv"].format(kind=kind, yy=f"{year % 100:02d}")]:
+        raw = _try_fetch(url)
+        if raw and "Table 8." in raw[:300]:
+            return raw
+    raise NotReady(f"The CRA has not published the T4127 tables for January {year} yet.")
+
+
+def check_brackets(label, new, old, notes):
+    """Sanity checks: starts at 0, rising thresholds, sane rates. Notes (not failures) when the structure changed."""
+    if not new or new[0][0] != 0 or any(b[0] <= a[0] for a, b in zip(new, new[1:])):
+        raise Failure(f"{label}: brackets {new} are not in order.")
+    if any(not (0 <= r <= 60) for _, r in new):
+        raise Failure(f"{label}: a rate in {new} is outside 0-60%.")
+    if not old:
+        return
+    if len(new) != len(old) or any(a[1] != b[1] for a, b in zip(new, old)):
+        notes.append(f"{label}: brackets changed shape or rates (was {old}, now {new}). Worth a quick look.")
+        return
+    for (t_new, _), (t_old, _) in zip(new[1:], old[1:]):
+        check_plausible(f"{label} threshold", t_new * 100, t_old * 100)
+
+
+def _jur(code, name, brackets, bpa, extra=None):
+    j = {"code": code, "name": name, "brackets": brackets, "bpa": bpa, "credit": brackets[0][1]}
+    if extra:
+        j.update(extra)
+    return j
+
+
+def gather_tax(prev, year, notes):
+    """Builds the tax entry for `year` from the official sources. `prev` is last year's entry (for checks and Quebec)."""
+    rates = t4127_brackets(t4127_csv(T4127_RATES, year), year)
+    bpa, surtax, abatement = t4127_other(t4127_csv(T4127_OTHER, year), year)
+    fed_bpa, index_pct = cra_index_values(parse_html(fetch(TAX_PAGES["cra_index"]))[1], year)
+    single, joint = us_tax(year)
+    page = cra_year_brackets(*parse_html(fetch(TAX_PAGES["cra_year"])), year)
+    if page:
+        rates.update(page)  # the tax-return page wins over the payroll tables when it already shows the year
+
+    prev_by_code = {p["code"]: p for p in prev.get("provinces", [])}
+    bpa["FED"] = fed_bpa
+    if bpa.get("YT") is None:
+        bpa["YT"] = fed_bpa  # Yukon's basic personal amount follows the federal one
+    provinces = []
+    for code, name in PROVINCES:
+        old = prev_by_code.get(code)
+        if code == "QC":
+            f = 1 + index_pct / 100
+            br = [[0, old["brackets"][0][1]]] + [[int(round(t * f / 5) * 5), r] for t, r in old["brackets"][1:]]
+            provinces.append(_jur(code, name, br, int(round(old["bpa"] * f))))
+            notes.append(f"{year} Quebec: indexed from {year - 1} by {index_pct}% (Revenu Quebec cannot be read "
+                         "automatically). Rates unchanged. Compare with Revenu Quebec's 'Income tax rates' page.")
+            continue
+        value = bpa.get(code)
+        if value is None:
+            value = old["bpa"] if old else None
+            notes.append(f"{year} {name}: the basic personal amount is a formula in the payroll tables; kept {value:,}.")
+        extra = {"surtax": surtax} if code == "ON" else None
+        check_brackets(f"{year} {name}", rates[code], old and old["brackets"], notes)
+        if old and old.get("bpa"):
+            check_plausible(f"{year} {name} basic personal amount", value * 100, old["bpa"] * 100)
+        provinces.append(_jur(code, name, rates[code], value, extra))
+
+    check_brackets(f"{year} federal", rates["FED"], prev.get("federalCA", {}).get("brackets"), notes)
+    check_brackets(f"{year} US single", single, prev.get("usSingle", {}).get("brackets"), notes)
+    check_brackets(f"{year} US joint", joint, prev.get("usJoint", {}).get("brackets"), notes)
+    entry = {k: v for k, v in prev.items() if k in ("note",)}
+    entry.update({
+        "sources": [TAX_PAGES["t4127"], TAX_PAGES["cra_index"], f"IRS tax year {year} inflation adjustments release"],
+        "quebecAbatementPct": abatement,
+        "federalCA": _jur("FED", "Federal", rates["FED"], fed_bpa),
+        "provinces": provinces,
+        "usSingle": {"code": "US", "name": "Federal", "brackets": single},
+        "usJoint": {"code": "US", "name": "Federal", "brackets": joint},
+    })
+    return entry
+
+
+def refresh_tax(entry, year, notes):
+    """Mid-year: if the CRA current-year page shows `year` with different brackets (a budget change), use them."""
+    page = cra_year_brackets(*parse_html(fetch(TAX_PAGES["cra_year"])), year)
+    if not page:
+        return False
+    changed = False
+    jurs = [entry["federalCA"]] + [p for p in entry["provinces"] if p["code"] != "QC"]
+    for j in jurs:
+        new = page[j["code"]]
+        if new != j["brackets"]:
+            check_brackets(f"{year} {j['name']}", new, None, notes)
+            notes.append(f"{year} {j['name']}: brackets updated from the CRA current-year page (was {j['brackets']}, now {new}).")
+            j["brackets"], j["credit"] = new, new[0][1]
+            changed = True
+    return changed
+
+
+def update_tax(data, today, log):
+    """Adds next year's tax brackets when published, and keeps this year's in line with the CRA page. Returns True if changed."""
+    tax = data.setdefault("tax", {})
+    years = sorted(int(y) for y in tax if y.isdigit())
+    if not years:
+        return False
+    notes, changed = [], False
+    target = years[-1] + 1
+    if target <= today.year + 1 and today >= datetime.date(target - 1, *TAX_DUE):
+        try:
+            tax[str(target)] = gather_tax(tax[str(years[-1])], target, notes)
+            log.append(f"Published {target} tax brackets.")
+            changed = True
+        except NotReady as e:
+            log.append(f"{target} tax brackets not ready yet: {e}")
+            if today >= datetime.date(target, *TAX_OVERDUE):
+                raise Failure(f"{target} tax brackets are still not published and it is already {today.isoformat()}. "
+                              "Refund estimates are using last year's brackets. Check scripts/update_limits.py.")
+    if str(today.year) in tax:
+        try:
+            if refresh_tax(tax[str(today.year)], today.year, notes):
+                log.append(f"Updated {today.year} tax brackets from the CRA current-year page.")
+                changed = True
+        except OSError as e:
+            say(f"Could not check the CRA current-year page: {e}", "warning")
+    if notes:
+        with open(TAX_NOTES_PATH, "w", encoding="utf-8") as fh:
+            fh.write("The daily limits check changed the tax brackets used by the refund estimate. Nothing needs doing "
+                     "unless something below looks wrong; edit limits.json on main to correct it.\n\n")
+            fh.write("\n".join(f"- {n}" for n in notes) + "\n")
+    if changed:
+        data["updated"] = today.isoformat()
+    return changed
 
 
 def main(argv):
