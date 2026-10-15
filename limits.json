@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-02",
+  "updated": "2026-10-15",
   "sources": [
     "CRA: RRSP, DPSP, TFSA limits table (2026: RRSP 33,810; TFSA 7,000)",
     "CRA: FHSA rules (8,000 annual, 40,000 lifetime, carry-forward up to 8,000)",
@@ -236,5 +236,480 @@
         "yearOffset": 0
       }
     }
-  ]
+  ],
+  "tax": {
+    "2026": {
+      "note": "Brackets apply to taxable income. Canada: federal and provincial brackets, basic personal amount (bpa, dollars) and its credit rate (percent); surtax pairs are [provincial tax threshold, percent]. US: federal brackets on taxable income after the standard deduction.",
+      "sources": [
+        "https://assets.kpmg.com/content/dam/kpmg/ca/pdf/2026/01/ca-federal-and-provincial-territorial-income-tax-rates-and-brackets-for-2026.pdf",
+        "https://www2.gov.bc.ca/gov/content/taxes/income-taxes/personal/tax-rates",
+        "https://kpmg.com/us/en/taxnewsflash/news/2025/10/tnf-rev-proc-2025-32-inflation-adjustments-for-2026-individual-taxpayers.html"
+      ],
+      "quebecAbatementPct": 16.5,
+      "federalCA": {
+        "code": "FED",
+        "name": "Federal",
+        "brackets": [
+          [
+            0,
+            14.0
+          ],
+          [
+            58523,
+            20.5
+          ],
+          [
+            117045,
+            26.0
+          ],
+          [
+            181440,
+            29.0
+          ],
+          [
+            258482,
+            33.0
+          ]
+        ],
+        "bpa": 16452,
+        "credit": 14.0
+      },
+      "provinces": [
+        {
+          "code": "AB",
+          "name": "Alberta",
+          "brackets": [
+            [
+              0,
+              8.0
+            ],
+            [
+              61200,
+              10.0
+            ],
+            [
+              154259,
+              12.0
+            ],
+            [
+              185111,
+              13.0
+            ],
+            [
+              246813,
+              14.0
+            ],
+            [
+              370220,
+              15.0
+            ]
+          ],
+          "bpa": 22769,
+          "credit": 8.0
+        },
+        {
+          "code": "BC",
+          "name": "British Columbia",
+          "brackets": [
+            [
+              0,
+              5.6
+            ],
+            [
+              50363,
+              7.7
+            ],
+            [
+              100728,
+              10.5
+            ],
+            [
+              115648,
+              12.29
+            ],
+            [
+              140430,
+              14.7
+            ],
+            [
+              190405,
+              16.8
+            ],
+            [
+              265545,
+              20.5
+            ]
+          ],
+          "bpa": 13216,
+          "credit": 5.6
+        },
+        {
+          "code": "MB",
+          "name": "Manitoba",
+          "brackets": [
+            [
+              0,
+              10.8
+            ],
+            [
+              47000,
+              12.75
+            ],
+            [
+              100000,
+              17.4
+            ]
+          ],
+          "bpa": 15780,
+          "credit": 10.8
+        },
+        {
+          "code": "NB",
+          "name": "New Brunswick",
+          "brackets": [
+            [
+              0,
+              9.4
+            ],
+            [
+              52333,
+              14.0
+            ],
+            [
+              104666,
+              16.0
+            ],
+            [
+              193861,
+              19.5
+            ]
+          ],
+          "bpa": 13664,
+          "credit": 9.4
+        },
+        {
+          "code": "NL",
+          "name": "Newfoundland and Labrador",
+          "brackets": [
+            [
+              0,
+              8.7
+            ],
+            [
+              44678,
+              14.5
+            ],
+            [
+              89354,
+              15.8
+            ],
+            [
+              159528,
+              17.8
+            ],
+            [
+              223340,
+              19.8
+            ],
+            [
+              285319,
+              20.8
+            ],
+            [
+              570638,
+              21.3
+            ],
+            [
+              1141275,
+              21.8
+            ]
+          ],
+          "bpa": 13094,
+          "credit": 8.7
+        },
+        {
+          "code": "NS",
+          "name": "Nova Scotia",
+          "brackets": [
+            [
+              0,
+              8.79
+            ],
+            [
+              30995,
+              14.95
+            ],
+            [
+              61991,
+              16.67
+            ],
+            [
+              97417,
+              17.5
+            ],
+            [
+              157124,
+              21.0
+            ]
+          ],
+          "bpa": 11932,
+          "credit": 8.79
+        },
+        {
+          "code": "NT",
+          "name": "Northwest Territories",
+          "brackets": [
+            [
+              0,
+              5.9
+            ],
+            [
+              53003,
+              8.6
+            ],
+            [
+              106009,
+              12.2
+            ],
+            [
+              172346,
+              14.05
+            ]
+          ],
+          "bpa": 18198,
+          "credit": 5.9
+        },
+        {
+          "code": "NU",
+          "name": "Nunavut",
+          "brackets": [
+            [
+              0,
+              4.0
+            ],
+            [
+              55801,
+              7.0
+            ],
+            [
+              111602,
+              9.0
+            ],
+            [
+              181439,
+              11.5
+            ]
+          ],
+          "bpa": 19659,
+          "credit": 4.0
+        },
+        {
+          "code": "ON",
+          "name": "Ontario",
+          "brackets": [
+            [
+              0,
+              5.05
+            ],
+            [
+              53891,
+              9.15
+            ],
+            [
+              107785,
+              11.16
+            ],
+            [
+              150000,
+              12.16
+            ],
+            [
+              220000,
+              13.16
+            ]
+          ],
+          "bpa": 12989,
+          "credit": 5.05,
+          "surtax": [
+            [
+              5818,
+              20.0
+            ],
+            [
+              7446,
+              36.0
+            ]
+          ]
+        },
+        {
+          "code": "PE",
+          "name": "Prince Edward Island",
+          "brackets": [
+            [
+              0,
+              9.5
+            ],
+            [
+              33928,
+              13.47
+            ],
+            [
+              65820,
+              16.6
+            ],
+            [
+              106890,
+              17.62
+            ],
+            [
+              142250,
+              19.0
+            ]
+          ],
+          "bpa": 15000,
+          "credit": 9.5
+        },
+        {
+          "code": "QC",
+          "name": "Quebec",
+          "brackets": [
+            [
+              0,
+              14.0
+            ],
+            [
+              54345,
+              19.0
+            ],
+            [
+              108680,
+              24.0
+            ],
+            [
+              132245,
+              25.75
+            ]
+          ],
+          "bpa": 18952,
+          "credit": 14.0
+        },
+        {
+          "code": "SK",
+          "name": "Saskatchewan",
+          "brackets": [
+            [
+              0,
+              10.5
+            ],
+            [
+              54532,
+              12.5
+            ],
+            [
+              155805,
+              14.5
+            ]
+          ],
+          "bpa": 20381,
+          "credit": 10.5
+        },
+        {
+          "code": "YT",
+          "name": "Yukon",
+          "brackets": [
+            [
+              0,
+              6.4
+            ],
+            [
+              58523,
+              9.0
+            ],
+            [
+              117045,
+              10.9
+            ],
+            [
+              181440,
+              12.8
+            ],
+            [
+              500000,
+              15.0
+            ]
+          ],
+          "bpa": 16452,
+          "credit": 6.4
+        }
+      ],
+      "usSingle": {
+        "code": "US",
+        "name": "Federal",
+        "brackets": [
+          [
+            0,
+            10.0
+          ],
+          [
+            12400,
+            12.0
+          ],
+          [
+            50400,
+            22.0
+          ],
+          [
+            105700,
+            24.0
+          ],
+          [
+            201775,
+            32.0
+          ],
+          [
+            256225,
+            35.0
+          ],
+          [
+            640600,
+            37.0
+          ]
+        ]
+      },
+      "usJoint": {
+        "code": "US",
+        "name": "Federal",
+        "brackets": [
+          [
+            0,
+            10.0
+          ],
+          [
+            24800,
+            12.0
+          ],
+          [
+            100800,
+            22.0
+          ],
+          [
+            211400,
+            24.0
+          ],
+          [
+            403550,
+            32.0
+          ],
+          [
+            512450,
+            35.0
+          ],
+          [
+            768700,
+            37.0
+          ]
+        ]
+      }
+    }
+  }
 }
