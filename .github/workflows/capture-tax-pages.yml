@@ -3,7 +3,7 @@ on:
   push:
     branches: [tax-brackets]
     paths: [".github/workflows/capture-tax-pages.yml"]
-# round 2
+# round 3
 permissions:
   contents: write
 jobs:
@@ -29,6 +29,10 @@ jobs:
             "irs_release": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
             "irs_newsroom": "https://www.irs.gov/newsroom",
             "irs_news_releases": "https://www.irs.gov/newsroom/news-releases-for-current-month",
+            "cra_t4127": "https://www.canada.ca/en/revenue-agency/services/forms-publications/payroll/t4127-payroll-deductions-formulas/t4127-jan/t4127-jan-payroll-deductions-formulas-computer-programs.html",
+            "cra_t4127_other": "https://www.canada.ca/content/dam/cra-arc/formspubs/pub/t4127-jan/thrrtsmnts-01-26e.csv",
+            "cra_t4127_rates": "https://www.canada.ca/content/dam/cra-arc/formspubs/pub/t4127-jan/rtsncmtrshldcnstnt-01-26e.csv",
+            "rq_rates": "https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/income-tax-rates/",
           }
           # second capture round: only fetch what is new
           pages = {k: v for k, v in pages.items() if not os.path.exists(f"scripts/fixtures/raw/{k}.html")}
