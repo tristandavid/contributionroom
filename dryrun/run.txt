@@ -1,0 +1,6 @@
+2027 not ready yet: CRA table has no 2027 row for TFSA yet.
+::notice::2027 not ready yet: CRA table has no 2027 row for TFSA yet.
+2027 tax brackets not ready yet: The CRA has not published the T4127 tables for January 2027 yet.
+::notice::2027 tax brackets not ready yet: The CRA has not published the T4127 tables for January 2027 yet.
+Updated 2026 tax brackets from the CRA current-year page.
+::notice::Updated 2026 tax brackets from the CRA current-year page.

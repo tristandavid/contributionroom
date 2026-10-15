@@ -1,0 +1,6 @@
+2026 rtsncmtrshldcnstnt OK 1815
+2026 thrrtsmnts OK 652
+2026 US ([[0, 10.0], [12400, 12.0], [50400, 22.0], [105700, 24.0], [201775, 32.0], [256225, 35.0], [640600, 37.0]], [[0, 10.0], [24800, 12.0], [100800, 22.0], [211400, 24.0], [403550, 32.0], [512450, 35.0], [768700, 37.0]])
+2027 rtsncmtrshldcnstnt NotReady The CRA has not published the T4127 tables for January 2027 yet.
+2027 thrrtsmnts NotReady The CRA has not published the T4127 tables for January 2027 yet.
+2027 US NotReady The IRS has not published its tax year 2027 inflation adjustments yet.
