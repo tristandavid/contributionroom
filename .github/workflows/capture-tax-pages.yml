@@ -3,6 +3,7 @@ on:
   push:
     branches: [tax-brackets]
     paths: [".github/workflows/capture-tax-pages.yml"]
+# round 2
 permissions:
   contents: write
 jobs:
@@ -23,7 +24,14 @@ jobs:
             "cra_rates": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/canadian-income-tax-rates-individuals-current-previous-years.html",
             "cra_index": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/frequently-asked-questions-individuals/adjustment-personal-income-tax-benefit-amounts.html",
             "irs_brackets": "https://www.irs.gov/filing/federal-income-tax-rates-and-brackets",
+            "cra_year": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html",
+            "cra_all_years": "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/all-years.html",
+            "irs_release": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
+            "irs_newsroom": "https://www.irs.gov/newsroom",
+            "irs_news_releases": "https://www.irs.gov/newsroom/news-releases-for-current-month",
           }
+          # second capture round: only fetch what is new
+          pages = {k: v for k, v in pages.items() if not os.path.exists(f"scripts/fixtures/raw/{k}.html")}
           os.makedirs("scripts/fixtures/raw", exist_ok=True)
           for name, url in pages.items():
               try:
