@@ -1,1 +1,0 @@
-OSError('https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/income-tax-rates/: HTTP Error 403: Forbidden')
