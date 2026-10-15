@@ -3,7 +3,7 @@ on:
   push:
     branches: [tax-brackets]
     paths: [".github/workflows/capture-tax-pages.yml"]
-# round 3
+# round 4
 permissions:
   contents: write
 jobs:
@@ -33,6 +33,7 @@ jobs:
             "cra_t4127_other": "https://www.canada.ca/content/dam/cra-arc/formspubs/pub/t4127-jan/thrrtsmnts-01-26e.csv",
             "cra_t4127_rates": "https://www.canada.ca/content/dam/cra-arc/formspubs/pub/t4127-jan/rtsncmtrshldcnstnt-01-26e.csv",
             "rq_rates": "https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/income-tax-rates/",
+            "rq_bpa": "https://www.revenuquebec.ca/en/citizens/income-tax-return/completing-your-income-tax-return/completing-your-return/line-by-line-help/350-to-398-1-non-refundable-tax-credits/line-350/",
           }
           # second capture round: only fetch what is new
           pages = {k: v for k, v in pages.items() if not os.path.exists(f"scripts/fixtures/raw/{k}.html")}
@@ -41,7 +42,13 @@ jobs:
               try:
                   raw = U.fetch(url)
               except Exception as e:
-                  print("FAILED", name, e); continue
+                  open(f"scripts/fixtures/raw/{name}.error.txt", "w").write(repr(e))
+                  import urllib.request
+                  try:
+                      req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36", "Accept": "text/html", "Accept-Language": "en-CA,en"})
+                      raw = urllib.request.urlopen(req, timeout=40).read().decode("utf-8", "replace")
+                  except Exception as e2:
+                      open(f"scripts/fixtures/raw/{name}.error2.txt", "w").write(repr(e2)); continue
               open(f"scripts/fixtures/raw/{name}.html", "w").write(raw)
               text, tables = U.parse_html(raw)
               json.dump({"text": text, "tables": tables}, open(f"scripts/fixtures/{name}.json", "w"), ensure_ascii=False)
