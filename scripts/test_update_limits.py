@@ -150,5 +150,142 @@ class Run(unittest.TestCase):
         self.assertFalse(U.run(today=datetime.date(2026, 11, 6)))  # 2028 is not due until Sept 2027
 
 
+def read(name):
+    with open(os.path.join(HERE, "fixtures", name), encoding="utf-8") as f:
+        return f.read()
+
+
+def page_html(name, year_from=None, year_to=None):
+    """Rebuilds simple HTML from a saved page so parse_html returns the same text and tables."""
+    text, tables = fixture(name)
+    import html as h
+    parts = ["<p>" + h.escape(text) + "</p>"]
+    for t in tables:
+        parts.append("<table>" + "".join("<tr>" + "".join(f"<td>{h.escape(c)}</td>" for c in r) + "</tr>" for r in t) + "</table>")
+    out = "".join(parts)
+    return out.replace(year_from, year_to) if year_from else out
+
+
+class Tax(unittest.TestCase):
+    def test_payroll_tables_2026(self):
+        r = U.t4127_brackets(read("t4127_rates_2026.csv"), 2026)
+        self.assertEqual(r["FED"], [[0, 14.0], [58523, 20.5], [117045, 26.0], [181440, 29.0], [258482, 33.0]])
+        self.assertEqual(r["PE"][-1], [142520, 19.0])
+        self.assertNotIn("QC", r)
+        bpa, surtax, abatement = U.t4127_other(read("t4127_other_2026.csv"), 2026)
+        self.assertEqual((bpa["AB"], bpa["ON"], bpa["FED"], bpa["QC"]), (22769, 12989, None, None))
+        self.assertEqual(surtax, [[5818, 20.0], [7446, 36.0]])
+        self.assertEqual(abatement, 16.5)
+
+    def test_payroll_tables_not_ready(self):
+        with self.assertRaises(U.NotReady):
+            U.t4127_brackets(read("t4127_rates_2026.csv"), 2027)
+        with self.assertRaises(U.NotReady):
+            U.t4127_other(read("t4127_other_2026.csv"), 2027)
+
+    def test_payroll_layout_change(self):
+        with self.assertRaises(U.Failure):
+            U.t4127_brackets("Something else,,\n", 2026)
+
+    def test_federal_bpa(self):
+        self.assertEqual(U.cra_index_values(fixture("cra_index")[1], 2026), (16452, 2.0))
+        with self.assertRaises(U.NotReady):
+            U.cra_index_values(fixture("cra_index")[1], 2027)
+
+    def test_current_year_page(self):
+        text, tables = fixture("cra_year")
+        got = U.cra_year_brackets(text, tables, 2026)
+        self.assertEqual(len(got), 13)
+        self.assertEqual(got["MB"], [[0, 10.8], [47564, 12.75], [101200, 17.4]])
+        self.assertEqual(got["NT"][0], [0, 5.9])
+        self.assertEqual(got["YT"][-1], [500000, 15.0])
+        self.assertIsNone(U.cra_year_brackets(text, tables, 2027))
+
+    def test_irs_release_matches_limits_json(self):
+        single, joint = U.irs_release_brackets(fixture("irs_release")[0], 2026)
+        known = base_data()["tax"]["2026"]
+        self.assertEqual(single, known["usSingle"]["brackets"])
+        self.assertEqual(joint, known["usJoint"]["brackets"])
+        self.assertIsNone(U.irs_release_brackets(fixture("irs_release")[0], 2027))
+
+    def test_irs_release_reworded(self):
+        with self.assertRaises(U.Failure):
+            U.irs_release_brackets("For tax year 2026, the top tax rate is now explained differently.", 2026)
+
+    def test_finds_release_links(self):
+        raw = '<a href="/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2027-x">x</a><a href="/other">y</a>'
+        self.assertEqual(U._links(raw, r"inflation-adjustments?-for-tax-year-2027"),
+                         ["https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2027-x"])
+
+    def test_bracket_checks(self):
+        notes = []
+        with self.assertRaises(U.Failure):
+            U.check_brackets("x", [[0, 10.0], [500, 12.0], [400, 15.0]], None, notes)
+        with self.assertRaises(U.Failure):
+            U.check_brackets("x", [[0, 10.0], [50000, 20.0]], [[0, 10.0], [20000, 20.0]], notes)  # 2.5x jump
+        U.check_brackets("x", [[0, 9.0], [50000, 20.0]], [[0, 10.0], [49000, 20.0]], notes)  # rate cut: noted, allowed
+        self.assertEqual(len(notes), 1)
+
+
+class TaxRun(unittest.TestCase):
+    """update_tax end to end, with the official pages served from the saved copies."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.old = (U.fetch, U.TAX_NOTES_PATH)
+        U.TAX_NOTES_PATH = os.path.join(self.tmp, "notes.md")
+        self.data = base_data()
+        self.pages = {}
+        U.fetch = self.fake_fetch
+
+    def tearDown(self):
+        U.fetch, U.TAX_NOTES_PATH = self.old
+
+    def fake_fetch(self, url):
+        if url in self.pages:
+            return self.pages[url]
+        raise OSError(f"404 {url}")
+
+    def publish_2027(self):
+        """The 2026 sources relabelled as if 2027 were out (same numbers, which passes the plausibility checks)."""
+        P = U.TAX_PAGES
+        self.pages[P["t4127_csv"].format(kind=U.T4127_RATES, yy="27")] = read("t4127_rates_2026.csv").replace("for 2026", "for 2027")
+        self.pages[P["t4127_csv"].format(kind=U.T4127_OTHER, yy="27")] = read("t4127_other_2026.csv").replace("for 2026", "for 2027")
+        self.pages[P["cra_index"]] = page_html("cra_index", "<td>2026</td>", "<td>2027</td>")
+        self.pages[P["irs_release_guess"].format(year=2027)] = page_html("irs_release", "For tax year 2026", "For tax year 2027")
+
+    def test_waits_then_publishes(self):
+        self.pages[U.TAX_PAGES["cra_year"]] = page_html("cra_year")
+        log = []
+        U.update_tax(self.data, datetime.date(2026, 11, 1), log)
+        self.assertNotIn("2027", self.data["tax"])
+        self.publish_2027()
+        self.assertTrue(U.update_tax(self.data, datetime.date(2026, 12, 1), log))
+        y = self.data["tax"]["2027"]
+        self.assertEqual(y["federalCA"]["bpa"], 16452)
+        self.assertEqual(y["quebecAbatementPct"], 16.5)
+        codes = [p["code"] for p in y["provinces"]]
+        self.assertEqual(len(codes), 13)
+        on = next(p for p in y["provinces"] if p["code"] == "ON")
+        self.assertEqual(on["surtax"], [[5818, 20.0], [7446, 36.0]])
+        qc = next(p for p in y["provinces"] if p["code"] == "QC")
+        self.assertEqual(qc["brackets"][1], [55430, 19.0])  # 54,345 indexed by 2.0%, to the nearest $5
+        yt = next(p for p in y["provinces"] if p["code"] == "YT")
+        self.assertEqual(yt["bpa"], 16452)
+        self.assertEqual(y["usJoint"]["brackets"][-1], [768700, 37.0])
+        self.assertTrue(os.path.exists(U.TAX_NOTES_PATH))  # Quebec is always noted
+
+    def test_mid_year_budget_change(self):
+        self.pages[U.TAX_PAGES["cra_year"]] = page_html("cra_year")
+        self.assertTrue(U.update_tax(self.data, datetime.date(2026, 6, 1), []))
+        mb = next(p for p in self.data["tax"]["2026"]["provinces"] if p["code"] == "MB")
+        self.assertEqual(mb["brackets"], [[0, 10.8], [47564, 12.75], [101200, 17.4]])
+        self.assertFalse(U.update_tax(self.data, datetime.date(2026, 6, 2), []))  # nothing new the next day
+
+    def test_overdue_fails(self):
+        with self.assertRaises(U.Failure):
+            U.update_tax(self.data, datetime.date(2027, 2, 2), [])
+
+
 if __name__ == "__main__":
     unittest.main()
