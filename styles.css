@@ -29,6 +29,8 @@ h2{font-size:28px;letter-spacing:-.01em;margin:0 0 20px;text-wrap:balance}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px}
 .card h3{margin:0 0 6px;font-size:17px}.card p{margin:0;color:var(--muted);font-size:15px}
+h2 .tag{display:inline-block;vertical-align:middle;margin-left:8px;background:var(--mint);color:var(--green);font-size:12px;font-weight:800;letter-spacing:.04em;padding:4px 10px;border-radius:99px}
+#tools > .note{margin:-8px 0 20px;font-size:16px}
 .accts{display:flex;flex-wrap:wrap;gap:8px}.accts span{background:var(--mint);color:var(--green);font-weight:700;font-size:13px;padding:6px 12px;border-radius:99px}
 .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
 .plan strong{display:block;font-size:20px;margin-bottom:4px}
