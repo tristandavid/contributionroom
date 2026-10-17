@@ -12,7 +12,9 @@ def fixture(name):
 
 
 def base_data():
-    with open(os.path.join(HERE, "..", "limits.json"), encoding="utf-8") as f:
+    """A frozen copy of limits.json as it was for 2026. The live file changes every year (the updater adds to it), so the
+    tests must not read it, or they would start failing as soon as the updater does its job."""
+    with open(os.path.join(HERE, "fixtures", "limits_2026.json"), encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -277,6 +279,8 @@ class TaxRun(unittest.TestCase):
 
     def test_mid_year_budget_change(self):
         self.pages[U.TAX_PAGES["cra_year"]] = page_html("cra_year")
+        mb = next(p for p in self.data["tax"]["2026"]["provinces"] if p["code"] == "MB")
+        mb["brackets"] = [[0, 10.8], [47000, 12.75], [100000, 17.4]]  # Manitoba as it stood before its 2026 budget
         self.assertTrue(U.update_tax(self.data, datetime.date(2026, 6, 1), []))
         mb = next(p for p in self.data["tax"]["2026"]["provinces"] if p["code"] == "MB")
         self.assertEqual(mb["brackets"], [[0, 10.8], [47564, 12.75], [101200, 17.4]])
