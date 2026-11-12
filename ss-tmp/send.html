@@ -1,4 +1,0 @@
-<!doctype html><meta charset="utf-8"><title>send</title><script>
-const names=["cr-iphone-1-dashboard.png","cr-iphone-2-account.png","cr-iphone-3-deadlines.png","cr-iphone-4-insights.png","cr-iphone-5-projection.png","preview.mp4"];
-(async()=>{const t=window.opener||window.parent;for(const n of names){const b=await (await fetch(n,{cache:"no-store"})).arrayBuffer();t.postMessage({tsShot:n,buf:b},"*")}t.postMessage({tsDone:1},"*")})();
-</script>
