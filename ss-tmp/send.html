@@ -1,0 +1,4 @@
+<!doctype html><meta charset="utf-8"><title>send</title><script>
+const names=["cr-1.3-watch-1.png"];
+(async()=>{const t=window.opener||window.parent;for(const n of names){const b=await (await fetch(n,{cache:"no-store"})).arrayBuffer();t.postMessage({tsShot:n,buf:b},"*")}t.postMessage({tsDone:1},"*")})();
+</script>
